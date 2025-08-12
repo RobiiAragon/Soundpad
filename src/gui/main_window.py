@@ -87,7 +87,7 @@ class MainWindow(QWidget):
             row['browse_btn'].clicked.connect(lambda _, i=idx: self._browse_audio(i))
 
     def _wire_tray(self):
-        self.tray = TrayController(self)
+    self.tray = TrayController(self)
     self.tray.request_show.connect(self._on_tray_show)
     self.tray.request_start_listen.connect(self._start_listening)
     self.tray.request_stop_listen.connect(self._stop_listening)
@@ -160,12 +160,6 @@ class MainWindow(QWidget):
         # start a temporary listener for capture
         dtype, dinfo = self.device_map[self.device_selector.currentIndex()]
         tmp_listener = DeviceListener(dtype, dinfo)
-        try:
-            tmp_listener.start()
-        except Exception as e:
-            QMessageBox.critical(self, "Escucha", f"No se pudo iniciar escucha: {e}")
-            return
-
         self.rows[row_idx]['key_edit'].setText("Escuchando...")
 
         def on_captured(sig: EventSignature):
@@ -176,6 +170,11 @@ class MainWindow(QWidget):
             self._start_listening()
 
         tmp_listener.capture_next(on_captured)
+        try:
+            tmp_listener.start()
+        except Exception as e:
+            QMessageBox.critical(self, "Escucha", f"No se pudo iniciar escucha: {e}")
+            return
 
     def _apply_changes(self):
         # stop existing listener
