@@ -1,5 +1,6 @@
 import threading
-from typing import Callable, Dict, Optional, Tuple
+import sys
+from typing import Callable, Dict, Optional
 
 from .types import EventSignature
 
@@ -97,6 +98,10 @@ class DeviceListener:
                 name = str(key)
             sig = EventSignature(type='keyboard', code=name, human=f"Tecla {name}")
             if self._capture_callback:
+                try:
+                    print(f"[capture] keyboard: {name}", file=sys.stdout, flush=True)
+                except Exception:
+                    pass
                 self._emit_capture(sig)
                 return False  # stop capture
             cb = self._bindings.get(self._sig_key(sig))
@@ -117,6 +122,10 @@ class DeviceListener:
             name = str(button)
             sig = EventSignature(type='mouse', code=name, human=f"Mouse {name}")
             if self._capture_callback:
+                try:
+                    print(f"[capture] mouse: {name}", file=sys.stdout, flush=True)
+                except Exception:
+                    pass
                 self._emit_capture(sig)
                 return False
             cb = self._bindings.get(self._sig_key(sig))
@@ -151,6 +160,10 @@ class DeviceListener:
             hex_code = f"{report_id:02X}-" + payload.hex().upper()
             sig = EventSignature(type='hid', vendor_id=vid, product_id=pid, code=hex_code, human=f"HID {vid:04X}:{pid:04X} [{hex_code}]")
             if self._capture_callback:
+                try:
+                    print(f"[capture] hid: {hex_code}", file=sys.stdout, flush=True)
+                except Exception:
+                    pass
                 self._emit_capture(sig)
                 return
             cb = self._bindings.get(self._sig_key(sig))
@@ -165,3 +178,76 @@ class DeviceListener:
             self._hid_device.set_raw_data_handler(None)
         except Exception:
             pass
+
+
+class MultiDeviceListener:
+    """Composite listener that runs keyboard, mouse, and all HID devices at once."""
+    def __init__(self):
+        self.is_running = False
+        self._listeners: list[DeviceListener] = []
+        self._capture_lock = threading.Lock()
+        self._capture_done = False
+
+        # Always include global keyboard and mouse
+        self._listeners.append(DeviceListener('keyboard', {}))
+        self._listeners.append(DeviceListener('mouse', {}))
+
+        # Include all HID devices available at construction time
+        try:
+            from .hid_devices import list_hid_devices
+            for dev in list_hid_devices():
+                self._listeners.append(DeviceListener('hid', {
+                    'vendor_id': dev.vendor_id,
+                    'product_id': dev.product_id,
+                }))
+        except Exception:
+            # If HID not available, proceed with keyboard/mouse only
+            pass
+
+    def bind(self, sig: EventSignature, cb: Callback):
+        # Bind into all underlying listeners; the signature specificity ensures only matches will fire
+        for l in self._listeners:
+            l.bind(sig, cb)
+
+    def start(self):
+        if self.is_running:
+            return
+        for l in self._listeners:
+            try:
+                l.start()
+            except Exception:
+                # carry on even if one device fails
+                pass
+        self.is_running = True
+
+    def stop(self):
+        for l in self._listeners:
+            try:
+                l.stop()
+            except Exception:
+                pass
+        self.is_running = False
+        with self._capture_lock:
+            self._capture_done = True
+
+    def capture_next(self, callback: Callable[[EventSignature], None]):
+        # Arm capture on all listeners and ensure only the first event wins.
+        with self._capture_lock:
+            self._capture_done = False
+
+        def once(sig: EventSignature):
+            with self._capture_lock:
+                if self._capture_done:
+                    return
+                self._capture_done = True
+            try:
+                callback(sig)
+            finally:
+                # stop all after capture
+                self.stop()
+
+        for l in self._listeners:
+            try:
+                l.capture_next(once)
+            except Exception:
+                pass

@@ -35,3 +35,9 @@ class AudioPlayer:
             except Exception:
                 return
         snd.play()
+
+    def stop_all(self):
+        try:
+            pygame.mixer.stop()
+        except Exception:
+            pass
