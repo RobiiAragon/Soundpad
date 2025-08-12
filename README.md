@@ -1,14 +1,18 @@
 # USB Sound Mapper
 
-Map USB device buttons (keyboard, mouse, HID gamepads) to play sounds on Windows.
+Map USB device buttons (MIDI, keyboards, mouses, HID gamepads) to play sounds on Windows.
 
 Features:
-- Select a USB/HID device or use global keyboard/mouse hooks
+- Select a MIDI/USB/HID device or use global keyboard/mouse hooks
 - Map up to 10 buttons/keys to audio files (WAV/MP3/OGG, etc.)
 - Runs in background with a system tray icon
 - Saves your mappings to a config file in %APPDATA%
 
-## Quick start
+## Quick start - compiled version (.Exe)
+
+1. Save the program.exe on a secure folder (is a portable program)
+
+## Quick start - base project
 
 1. Install dependencies:
 
