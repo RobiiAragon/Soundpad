@@ -1,6 +1,6 @@
-from PyQt6.QtGui import QIcon, QAction
+from PyQt6.QtGui import QIcon, QAction, QPainter, QColor, QPixmap, QFont
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
-from PyQt6.QtCore import pyqtSignal, QObject
+from PyQt6.QtCore import pyqtSignal, QObject, Qt
 
 
 class TrayController(QObject):
@@ -11,7 +11,20 @@ class TrayController(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.tray = QSystemTrayIcon(QIcon())
+        # Build a simple in-memory icon so Windows shows it in the tray
+        pix = QPixmap(32, 32)
+        pix.fill(QColor(30, 144, 255))  # DodgerBlue
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.GlobalColor.white)
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(14)
+        painter.setFont(font)
+        painter.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "SP")
+        painter.end()
+
+        self.tray = QSystemTrayIcon(QIcon(pix))
         self.tray.setToolTip("USB Sound Mapper")
         menu = QMenu()
 

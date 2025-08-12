@@ -3,13 +3,13 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QFileDialog, QGridLayout,
     QLineEdit, QMessageBox, QSystemTrayIcon
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 
 from src.core.config_store import ConfigStore
 from src.core.audio_player import AudioPlayer
 from src.core.device_listener import DeviceListener
 from src.core.types import EventSignature
-from src.core.hid_devices import list_hid_devices, HidDeviceInfo
+from src.core.hid_devices import list_hid_devices
 from .tray import TrayController
 
 
@@ -21,9 +21,9 @@ class MainWindow(QWidget):
 
         self.config = ConfigStore()
         self.audio = AudioPlayer()
-        self.listener = None  # type: DeviceListener | None
+        self.listener: DeviceListener | None = None
 
-        self.device_map = []  # list[tuple[str, dict]]
+        self.device_map: list[tuple[str, dict]] = []
 
         self._build_ui()
         self._load_config()
@@ -45,26 +45,24 @@ class MainWindow(QWidget):
 
         self.rows = []
         for i in range(10):
-            idx_label = QLabel(str(i+1))
-            key_edit = QLineEdit()
-            key_edit.setReadOnly(True)
-            audio_edit = QLineEdit()
-            audio_edit.setReadOnly(True)
+            idx_label = QLabel(str(i + 1))
+            key_edit = QLineEdit(); key_edit.setReadOnly(True)
+            audio_edit = QLineEdit(); audio_edit.setReadOnly(True)
             map_btn = QPushButton("Mapear")
             browse_btn = QPushButton("Seleccionar audio")
 
-            grid.addWidget(idx_label, i+1, 0)
-            grid.addWidget(key_edit, i+1, 1)
-            grid.addWidget(audio_edit, i+1, 2)
-            grid.addWidget(map_btn, i+1, 3)
-            grid.addWidget(browse_btn, i+1, 4)
+            grid.addWidget(idx_label, i + 1, 0)
+            grid.addWidget(key_edit, i + 1, 1)
+            grid.addWidget(audio_edit, i + 1, 2)
+            grid.addWidget(map_btn, i + 1, 3)
+            grid.addWidget(browse_btn, i + 1, 4)
 
             self.rows.append({
                 'key_edit': key_edit,
                 'audio_edit': audio_edit,
                 'map_btn': map_btn,
                 'browse_btn': browse_btn,
-                'signature': None,  # EventSignature
+                'signature': None,
                 'audio_path': None,
             })
 
@@ -87,18 +85,23 @@ class MainWindow(QWidget):
             row['browse_btn'].clicked.connect(lambda _, i=idx: self._browse_audio(i))
 
     def _wire_tray(self):
-    self.tray = TrayController(self)
-    self.tray.request_show.connect(self._on_tray_show)
-    self.tray.request_start_listen.connect(self._start_listening)
-    self.tray.request_stop_listen.connect(self._stop_listening)
-    self.tray.request_quit.connect(self._on_tray_quit)
-    self.tray.show()
+        self.tray = TrayController(self)
+        self.tray.request_show.connect(self._on_tray_show)
+        self.tray.request_start_listen.connect(self._start_listening)
+        self.tray.request_stop_listen.connect(self._stop_listening)
+        self.tray.request_quit.connect(self._on_tray_quit)
+        self.tray.show()
 
     def closeEvent(self, event):
         # Minimize to tray instead of closing
         event.ignore()
         self.hide()
-        self.tray.tray.showMessage("USB Sound Mapper", "La app sigue ejecutándose en segundo plano.", QSystemTrayIcon.MessageIcon.Information, 3000)
+        self.tray.tray.showMessage(
+            "USB Sound Mapper",
+            "La app sigue ejecutándose en segundo plano.",
+            QSystemTrayIcon.MessageIcon.Information,
+            3000,
+        )
 
     def _on_tray_show(self):
         self.showNormal()
@@ -136,28 +139,32 @@ class MainWindow(QWidget):
         sel = self.config.data.get('selected_device', {"type": "keyboard"})
         for i, (t, info) in enumerate(self.device_map):
             if t == sel.get('type'):
-                if t != 'hid' or (info.get('vendor_id') == sel.get('vendor_id') and info.get('product_id') == sel.get('product_id')):
+                if t != 'hid' or (
+                    info.get('vendor_id') == sel.get('vendor_id') and info.get('product_id') == sel.get('product_id')
+                ):
                     self.device_selector.setCurrentIndex(i)
                     break
 
     def _on_device_changed(self, idx: int):
-        # nothing special; will apply on Apply
+        # Settings will be applied on Apply
         pass
 
     def _browse_audio(self, row_idx: int):
         # Pause listening while browsing to avoid accidental triggers
         self._stop_listening()
-        path, _ = QFileDialog.getOpenFileName(self, "Selecciona archivo de audio", filter="Audio Files (*.wav *.mp3 *.ogg *.flac);;All Files (*.*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Selecciona archivo de audio",
+            filter="Audio Files (*.wav *.mp3 *.ogg *.flac);;All Files (*.*)",
+        )
         if path:
             self.rows[row_idx]['audio_path'] = path
             self.rows[row_idx]['audio_edit'].setText(path)
-        # Optionally resume listening
-        # self._start_listening()
 
     def _map_row(self, row_idx: int):
         # Pause any current listening during capture
         self._stop_listening()
-        # start a temporary listener for capture
+
         dtype, dinfo = self.device_map[self.device_selector.currentIndex()]
         tmp_listener = DeviceListener(dtype, dinfo)
         self.rows[row_idx]['key_edit'].setText("Escuchando...")
@@ -198,14 +205,14 @@ class MainWindow(QWidget):
                 return lambda: self.audio.play(audio_path)
             self.listener.bind(EventSignature.from_dict(m['signature']), make_cb(m['audio']))
 
-    # save config
-    self.config.data['selected_device'] = {'type': dtype, **dinfo}
-    self.config.data['mappings'] = mapping
-    self.config.save()
+        # save config
+        self.config.data['selected_device'] = {'type': dtype, **dinfo}
+        self.config.data['mappings'] = mapping
+        self.config.save()
 
-    # Auto-start listening after applying
-    self._start_listening()
-    QMessageBox.information(self, "Aplicado", "Mapeos aplicados y escucha iniciada.")
+        # Auto-start listening after applying
+        self._start_listening()
+        QMessageBox.information(self, "Aplicado", "Mapeos aplicados y escucha iniciada.")
 
     def _start_listening(self):
         if not self.listener:
