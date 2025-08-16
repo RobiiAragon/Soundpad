@@ -3,9 +3,16 @@ from typing import List, Dict
 
 
 class AudioPlayer:
-    def __init__(self):
+    def __init__(self, max_channels: int = 64):
+        # Pre-init y init del mixer
         pygame.mixer.pre_init(44100, -16, 2, 512)
         pygame.mixer.init()
+        # Aumentamos número de canales para permitir varias pistas simultáneas
+        try:
+            pygame.mixer.set_num_channels(max_channels)
+        except Exception:
+            pass
+        self.max_channels = max_channels
         self.cache: Dict[str, pygame.mixer.Sound] = {}
 
     def preload(self, paths: List[str]):
@@ -34,7 +41,19 @@ class AudioPlayer:
                 self.cache[path] = snd
             except Exception:
                 return
-        snd.play()
+        # Reproducimos sin cortar otros (canales elevados arriba)
+        try:
+            snd.play()
+        except Exception:
+            pass
+
+    def set_max_channels(self, n: int):
+        """Permite ajustar dinámicamente el máximo de canales."""
+        try:
+            pygame.mixer.set_num_channels(n)
+            self.max_channels = n
+        except Exception:
+            pass
 
     def stop_all(self):
         try:

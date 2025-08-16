@@ -87,7 +87,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # keep running in tray
-    app.setApplicationName("Soundpad - Practica de libro by Aragon")
+    app.setApplicationName("Soundpad v1.0.1 - by Aragón")
     window = MainWindow()
     if args.minimized:
         window.hide()

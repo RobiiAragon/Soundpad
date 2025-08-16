@@ -339,6 +339,12 @@ class DeviceListener:
                 if code not in fired_combos:
                     fire_if_bound(code, humanize(btns_sorted))
                     fired_combos.add(code)
+                # También dispara el botón individual recién presionado si hay binding
+                if len(btns_sorted) > 1:
+                    single_code = name
+                    if single_code not in fired_combos:
+                        fire_if_bound(single_code, humanize([name]))
+                        fired_combos.add(single_code)
             else:
                 if name in pressed_buttons:
                     pressed_buttons.remove(name)
@@ -445,6 +451,13 @@ class DeviceListener:
                 if cb:
                     cb()
                 fired_combos.add(combo_code)
+            # Dispara también el código individual recién presionado si existe binding
+            if hex_code not in fired_combos:
+                single_sig = EventSignature(type='hid', vendor_id=vid, product_id=pid, code=hex_code, human=make_human({hex_code}))
+                cb_single = self._bindings.get(self._sig_key(single_sig))
+                if cb_single:
+                    cb_single()
+                fired_combos.add(hex_code)
 
         self._hid_device.set_raw_data_handler(raw_handler)
         # Block until stop

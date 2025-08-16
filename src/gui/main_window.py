@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QStyle, QToolButton, QMenu
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QCursor  # (usar en futuro si se necesita; QIcon eliminado)
+from PyQt6.QtGui import QCursor, QBrush, QColor  # Añadimos QBrush/QColor para resaltar duplicados
 
 from src.core.config_store import ConfigStore
 from src.core.audio_player import AudioPlayer
@@ -27,9 +27,11 @@ class MainWindow(QWidget):
     capture_ready = pyqtSignal(int, object)  # (row_idx, EventSignature)
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Soundpad - Practica de libro by Aragon")
-        self.resize(880, 560)
+        self._init_window()
 
+    def _init_window(self):
+        self.setWindowTitle("Soundpad v1.0.1 - by Aragón")
+        self.resize(880, 560)
         # state
         self.config = ConfigStore()
         self.audio = AudioPlayer()
@@ -37,7 +39,6 @@ class MainWindow(QWidget):
         self._was_listening = False
         self._capture_listener = None
         self.device_map = []
-
         # ui and wiring
         self._build_ui()
         self._apply_styles()
@@ -121,12 +122,12 @@ QWidget { font-size: 11px; }
 QTableWidget {
     background: #202225;
     alternate-background-color: #26292c;
-    color: #223040; /* texto normal oscuro azulado */
+    color: #ffffff; /* texto normal ahora blanco para contraste */
     gridline-color: #404449;
-    selection-background-color: #3d5a80;
+    selection-background-color: #2c2f33;
     selection-color: #ffffff; /* texto seleccionado blanco */
 }
-QTableWidget::item { color: #223040; }
+QTableWidget::item { color: #ffffff; }
 QTableWidget::item:selected { color: #ffffff; }
 QHeaderView::section {
     background: #2c2f33;
@@ -281,20 +282,24 @@ QTabBar::tab:selected { background: #3a3d41; }
         dup_ids = {i.id for lst in dups.values() for i in lst}
         for r in range(self.table.rowCount()):
             item = self.mapping_manager.get_by_row(r)
-            base_color = Qt.GlobalColor.white
-            if item and item.id in dup_ids:
-                base_color = Qt.GlobalColor.yellow
+            is_dup = item and item.id in dup_ids
             for c in range(0,3):
                 it = self.table.item(r,c)
-                if it:
-                    it.setBackground(base_color)
+                if not it:
+                    continue
+                if is_dup:
+                    # Fondo ámbar oscuro para duplicados, texto ya está en blanco
+                    it.setBackground(QColor('#665500'))
+                else:
+                    # Restaurar fondo por defecto (usar brush vacío para que aplique alternating colors)
+                    it.setBackground(QBrush())
 
     def closeEvent(self, event):
         # Minimize to tray instead of closing
         event.ignore()
         self.hide()
         self.tray.tray.showMessage(
-            "Soundpad - Practica de libro by Aragon",
+            "Soundpad v1.0.1 - by Aragón",
             "La app sigue ejecutándose en segundo plano.",
             QSystemTrayIcon.MessageIcon.Information,
             3000,
@@ -529,6 +534,7 @@ def build_row(win: MainWindow, row: int, item: MappingItem):
     # Column 0: index
     idx_item = QTableWidgetItem(str(row + 1))
     idx_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+    idx_item.setForeground(Qt.GlobalColor.white)
     win.table.setItem(row, 0, idx_item)
 
     # Column 1: event signature
@@ -536,6 +542,7 @@ def build_row(win: MainWindow, row: int, item: MappingItem):
     ev_item = QTableWidgetItem(ev_text)
     ev_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
     ev_item.setToolTip(ev_text)
+    ev_item.setForeground(Qt.GlobalColor.white)
     win.table.setItem(row, 1, ev_item)
 
     # Column 2: audio path
@@ -543,6 +550,7 @@ def build_row(win: MainWindow, row: int, item: MappingItem):
     audio_item = QTableWidgetItem(audio_text)
     audio_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
     audio_item.setToolTip(audio_text)
+    audio_item.setForeground(Qt.GlobalColor.white)
     win.table.setItem(row, 2, audio_item)
 
     # Column 3: ensure action buttons
