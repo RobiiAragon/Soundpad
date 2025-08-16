@@ -10,6 +10,7 @@ from src.core.audio_player import AudioPlayer
 from src.core.device_listener import DeviceListener, MultiDeviceListener
 from src.core.types import EventSignature
 from src.core.hid_devices import list_hid_devices
+from src.core.midi_devices import list_midi_inputs
 from .tray import TrayController
 
 
@@ -178,6 +179,15 @@ class MainWindow(QWidget):
                 self.device_map.append(("hid", dev.__dict__))
         except Exception as e:
             QMessageBox.warning(self, "HID", f"No se pudieron listar dispositivos HID: {e}")
+
+        # MIDI inputs
+        try:
+            for md in list_midi_inputs():
+                label = f"MIDI: {md.name}"
+                self.device_selector.addItem(label)
+                self.device_map.append(("midi", {"name": md.name}))
+        except Exception as e:
+            QMessageBox.warning(self, "MIDI", f"No se pudieron listar dispositivos MIDI: {e}")
 
         # restore selection
         sel = self.config.data.get('selected_device', {"type": "keyboard"})
