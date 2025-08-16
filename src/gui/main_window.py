@@ -1,17 +1,25 @@
 from PyQt6.QtWidgets import (
     QApplication,
-    QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QFileDialog, QGridLayout,
-    QLineEdit, QMessageBox, QSystemTrayIcon, QHBoxLayout, QCheckBox, QSpinBox, QGroupBox
+    QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QFileDialog,
+    QLineEdit, QMessageBox, QSystemTrayIcon, QHBoxLayout, QCheckBox,
+    QTabWidget, QTextEdit, QTableWidget, QTableWidgetItem, QAbstractItemView,
+    QHeaderView, QStyle, QToolButton, QMenu
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 
 from src.core.config_store import ConfigStore
 from src.core.audio_player import AudioPlayer
 from src.core.device_listener import DeviceListener, MultiDeviceListener
 from src.core.types import EventSignature
 from src.core.hid_devices import list_hid_devices
-from src.core.midi_devices import list_midi_inputs
 from .tray import TrayController
+from src.core.logger import log, has_listeners
+from src.core.mapping_manager import MappingManager, MappingItem
+
+
+class _LogBridge(QObject):
+    line = pyqtSignal(str)
+
 
 
 class MainWindow(QWidget):
@@ -19,7 +27,7 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Soundpad - Practica de libro by Aragon")
-        self.resize(720, 520)
+    self.resize(880, 560)
 
         # state
         self.config = ConfigStore()
@@ -30,9 +38,9 @@ class MainWindow(QWidget):
         self.device_map = []
 
         # ui and wiring
-        self._build_ui()
-        self._load_config()
-        self._populate_devices()
+    self._build_ui()
+    self._load_config()
+    self._populate_devices()
         self._wire_tray()
         # wire capture signal
         self.capture_ready.connect(self._on_capture_ready)
@@ -40,69 +48,108 @@ class MainWindow(QWidget):
     def _build_ui(self):
         layout = QVBoxLayout()
 
+        # Title / device selector
         layout.addWidget(QLabel("Selecciona dispositivo (HID/Global)"))
         self.device_selector = QComboBox()
-        layout.addWidget(self.device_selector)
+        device_row = QHBoxLayout()
+        device_row.addWidget(self.device_selector)
+        self.refresh_devices_btn = QPushButton("Refrescar dispositivos")
+        self.log_chk = QCheckBox("Log")
+        device_row.addWidget(self.refresh_devices_btn)
+        device_row.addWidget(self.log_chk)
+        device_row.addStretch(1)
+        layout.addLayout(device_row)
 
-        self.grid = QGridLayout()
-        self.grid.addWidget(QLabel("#"), 0, 0)
-        self.grid.addWidget(QLabel("Botón/Tecla"), 0, 1)
-        self.grid.addWidget(QLabel("Audio"), 0, 2)
-        self.grid.addWidget(QLabel("Controles"), 0, 3)
+    # Mapping table (professional style)
+    self.mapping_manager = MappingManager()
+    self.table = QTableWidget(0, 4)
+    self.table.setHorizontalHeaderLabels(["#", "Evento", "Audio", "Acciones"])
+    self.table.verticalHeader().setVisible(False)
+    self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+    self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+    self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+    self.table.setAlternatingRowColors(True)
+    self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    layout.addWidget(self.table)
 
-        self.rows = []
-        # Inicialmente 10
-        for _ in range(10):
-            self._add_row()
+    # (MIDI group removido)
 
-        layout.addLayout(self.grid)
+        # Row management buttons
+    row_controls = QHBoxLayout()
+    self.add_row_btn = QPushButton("Añadir")
+    self.remove_row_btn = QPushButton("Eliminar")
+    self.dup_btn = QPushButton("Duplicados")
+    row_controls.addWidget(self.add_row_btn)
+    row_controls.addWidget(self.remove_row_btn)
+    row_controls.addWidget(self.dup_btn)
+    row_controls.addStretch(1)
+    layout.addLayout(row_controls)
 
-        # MIDI advanced options (hidden unless MIDI device selected)
-        self.midi_group = QGroupBox("Opciones MIDI")
-        midi_layout = QHBoxLayout()
-        self.chk_midi_velocity = QCheckBox("Incluir velocidad en notas")
-        self.chk_midi_ignore_same_cc = QCheckBox("Ignorar CC repetidos")
-        self.chk_midi_filter_notes = QCheckBox("Notas")
-        self.chk_midi_filter_cc = QCheckBox("CC")
-        self.spin_midi_timeout = QSpinBox()
-        self.spin_midi_timeout.setRange(50, 5000)
-        self.spin_midi_timeout.setSingleStep(50)
-        self.spin_midi_timeout.setSuffix(" ms timeout")
-        midi_layout.addWidget(self.chk_midi_velocity)
-        midi_layout.addWidget(self.chk_midi_ignore_same_cc)
-        midi_layout.addWidget(QLabel("Tipos:"))
-        midi_layout.addWidget(self.chk_midi_filter_notes)
-        midi_layout.addWidget(self.chk_midi_filter_cc)
-        midi_layout.addWidget(QLabel("Combo timeout:"))
-        midi_layout.addWidget(self.spin_midi_timeout)
-        midi_layout.addStretch(1)
-        self.midi_group.setLayout(midi_layout)
-        self.midi_group.setVisible(False)
-        layout.addWidget(self.midi_group)
-
-        # Botones para agregar/quitar filas
-        row_controls = QHBoxLayout()
-        self.add_row_btn = QPushButton("Agregar fila")
-        self.remove_row_btn = QPushButton("Quitar última fila")
-        row_controls.addWidget(self.add_row_btn)
-        row_controls.addWidget(self.remove_row_btn)
-        layout.addLayout(row_controls)
-
-        self.apply_btn = QPushButton("Aplicar cambios")
-        self.toggle_listen_btn = QPushButton("Iniciar escucha")
+        # Action buttons
+    self.apply_btn = QPushButton("Aplicar / Reiniciar escucha")
+    self.toggle_listen_btn = QPushButton("Iniciar escucha")
         layout.addWidget(self.apply_btn)
         layout.addWidget(self.toggle_listen_btn)
 
-        self.setLayout(layout)
-
-        # connections
+        # Connections
         self.device_selector.currentIndexChanged.connect(self._on_device_changed)
         self.apply_btn.clicked.connect(self._apply_changes)
         self.toggle_listen_btn.clicked.connect(self._toggle_listening)
+    self.add_row_btn.clicked.connect(self._add_row)
+    self.remove_row_btn.clicked.connect(self._remove_selected_row)
+    self.dup_btn.clicked.connect(self._show_duplicates)
+        self.refresh_devices_btn.clicked.connect(self._populate_devices)
+        self.log_chk.stateChanged.connect(self._on_log_toggle)
 
-        # Señales por fila se conectan al crear fila
-        self.add_row_btn.clicked.connect(self._add_row)
-        self.remove_row_btn.clicked.connect(self._remove_last_row)
+        # Tabs (main + log)
+        self.tabs = QTabWidget()
+        self.main_tab = QWidget()
+        self.main_tab.setLayout(layout)
+        self.log_view = QTextEdit()
+        self.log_view.setReadOnly(True)
+        self.tabs.addTab(self.main_tab, "Principal")
+        self.tabs.addTab(self.log_view, "Log")
+        outer = QVBoxLayout()
+        outer.addWidget(self.tabs)
+        self.setLayout(outer)
+
+    def _on_log_toggle(self, _):
+        import os
+        from src.core import logger
+        if self.log_chk.isChecked():
+            # Enable MIDI + HID debug env flags so listener prints become structured logs
+            os.environ['SP_DEBUG_HID'] = '1'
+            # Register UI sink
+            if not hasattr(self, '_log_bridge'):
+                self._log_bridge = _LogBridge()
+                self._log_bridge.line.connect(self.log_view.append)
+            def sink(line: str):
+                try:
+                    # simple overflow control
+                    if self.log_view.document().blockCount() > 4800:
+                        self.log_view.clear()
+                        self.log_view.append('[log] limpiado por overflow')
+                    self._log_bridge.line.emit(line)
+                except Exception:
+                    pass
+            self._log_sink = sink
+            logger.register(self._log_sink)
+            logger.log('Logging habilitado')
+            self.tabs.setCurrentWidget(self.log_view)
+        else:
+            if hasattr(self, '_log_sink'):
+                try:
+                    from src.core import logger
+                    logger.unregister(self._log_sink)
+                except Exception:
+                    pass
+                del self._log_sink
+            for k in ['SP_DEBUG_HID']:
+                if k in os.environ:
+                    del os.environ[k]
 
     def _wire_tray(self):
         self.tray = TrayController(self)
@@ -113,48 +160,87 @@ class MainWindow(QWidget):
         self.tray.show()
 
     def _add_row(self):
-        idx = len(self.rows)
-        idx_label = QLabel(str(idx + 1))
-        key_edit = QLineEdit()
-        key_edit.setReadOnly(True)
-        audio_edit = QLineEdit()
-        audio_edit.setReadOnly(True)
-        map_btn = QPushButton("Mapear")
-        browse_btn = QPushButton("Seleccionar audio")
+        item = self.mapping_manager.add()
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self._refresh_row(row, item)
 
-        self.grid.addWidget(idx_label, idx + 1, 0)
-        self.grid.addWidget(key_edit, idx + 1, 1)
-        self.grid.addWidget(audio_edit, idx + 1, 2)
-        self.grid.addWidget(map_btn, idx + 1, 3)
-        self.grid.addWidget(browse_btn, idx + 1, 4)
+    def _refresh_row(self, row: int, item: MappingItem):
+        # Column 0: index
+        idx_item = QTableWidgetItem(str(row + 1))
+        idx_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        self.table.setItem(row, 0, idx_item)
+        # Column 1: event signature human text
+        ev_text = item.signature.human if item.signature else "<sin evento>"
+        ev_item = QTableWidgetItem(ev_text)
+        ev_item.setToolTip(ev_text)
+        self.table.setItem(row, 1, ev_item)
+        # Column 2: audio path
+        audio_text = item.audio if item.audio else "<sin audio>"
+        audio_item = QTableWidgetItem(audio_text)
+        audio_item.setToolTip(audio_text)
+        self.table.setItem(row, 2, audio_item)
+        # Column 3: actions (toolbuttons)
+        w = QWidget()
+        h = QHBoxLayout(); h.setContentsMargins(0,0,0,0)
+        map_btn = QToolButton(); map_btn.setText("Capturar")
+        browse_btn = QToolButton(); browse_btn.setText("Audio")
+        clear_btn = QToolButton(); clear_btn.setText("Limpiar")
+        h.addWidget(map_btn); h.addWidget(browse_btn); h.addWidget(clear_btn)
+        h.addStretch(1)
+        w.setLayout(h)
+        self.table.setCellWidget(row, 3, w)
+        map_btn.clicked.connect(lambda _, r=row: self._map_row(r))
+        browse_btn.clicked.connect(lambda _, r=row: self._browse_audio(r))
+        clear_btn.clicked.connect(lambda _, r=row: self._clear_row(r))
 
-        row = {
-            'idx_label': idx_label,
-            'key_edit': key_edit,
-            'audio_edit': audio_edit,
-            'map_btn': map_btn,
-            'browse_btn': browse_btn,
-            'signature': None,
-            'audio_path': None,
-        }
-        self.rows.append(row)
+    def _clear_row(self, row: int):
+        item = self.mapping_manager.get_by_row(row)
+        if not item: return
+        item.signature = None
+        item.audio = ''
+        self._refresh_row(row, item)
+        self._update_duplicate_highlight()
 
-        map_btn.clicked.connect(lambda _, i=idx: self._map_row(i))
-        browse_btn.clicked.connect(lambda _, i=idx: self._browse_audio(i))
-
-    def _remove_last_row(self):
-        if not self.rows:
+    def _remove_selected_row(self):
+        row = self.table.currentRow()
+        if row < 0:
             return
-        row = self.rows.pop()
-        # Remove widgets from grid and delete them
-        for key in ['idx_label', 'key_edit', 'audio_edit', 'map_btn', 'browse_btn']:
-            w = row.get(key)
-            if w:
-                self.grid.removeWidget(w)
-                w.deleteLater()
-        # Renumerar índices visibles
-        for i, r in enumerate(self.rows):
-            r['idx_label'].setText(str(i + 1))
+        item = self.mapping_manager.get_by_row(row)
+        if not item:
+            return
+        self.mapping_manager.remove_ids([item.id])
+        self.table.removeRow(row)
+        # Renumber
+        for r in range(self.table.rowCount()):
+            if self.table.item(r,0):
+                self.table.item(r,0).setText(str(r+1))
+        self._update_duplicate_highlight()
+
+    def _show_duplicates(self):
+        dups = self.mapping_manager.detect_duplicates()
+        if not dups:
+            QMessageBox.information(self, "Duplicados", "No hay duplicados.")
+            return
+        msg = []
+        for k, lst in dups.items():
+            codes = ', '.join(str(i.id) for i in lst)
+            msg.append(f"{k} -> filas {codes}")
+        QMessageBox.warning(self, "Duplicados", "Se encontraron duplicados:\n" + '\n'.join(msg))
+        self._update_duplicate_highlight()
+
+    def _update_duplicate_highlight(self):
+        dups = self.mapping_manager.detect_duplicates()
+        dup_ids = {i.id for lst in dups.values() for i in lst}
+        for r in range(self.table.rowCount()):
+            item = self.mapping_manager.get_by_row(r)
+            base_color = Qt.GlobalColor.white
+            if item and item.id in dup_ids:
+                base_color = Qt.GlobalColor.yellow
+            for c in range(0,3):
+                it = self.table.item(r,c)
+                if it:
+                    it.setBackground(base_color)
 
     def closeEvent(self, event):
         # Minimize to tray instead of closing
@@ -181,36 +267,38 @@ class MainWindow(QWidget):
             QApplication.instance().quit()
 
     def _populate_devices(self):
+        if has_listeners():
+            log('Dispositivos: refrescando listado')
         self.device_selector.clear()
         self.device_map = []
 
         # Special option: All devices
         self.device_selector.addItem("Todos los dispositivos")
         self.device_map.append(("all", {}))
+        if has_listeners():
+            log('Añadido alias Todos los dispositivos')
 
         # Global options
         self.device_selector.addItem("Global Keyboard")
         self.device_map.append(("keyboard", {}))
         self.device_selector.addItem("Global Mouse")
         self.device_map.append(("mouse", {}))
+        if has_listeners():
+            log('Añadidos global keyboard/mouse')
 
-        # HID devices
+        # HID devices (deduplicados por VID:PID en list_hid_devices)
         try:
-            for dev in list_hid_devices():
+            hid_list = list_hid_devices()
+            for dev in hid_list:
                 label = f"HID: {dev.vendor_name or 'Vendor'} {dev.product_name or 'Product'} (VID:{dev.vendor_id:04X} PID:{dev.product_id:04X})"
                 self.device_selector.addItem(label)
                 self.device_map.append(("hid", dev.__dict__))
+                if has_listeners():
+                    log(f"HID detectado {label}")
         except Exception as e:
             QMessageBox.warning(self, "HID", f"No se pudieron listar dispositivos HID: {e}")
 
-        # MIDI inputs
-        try:
-            for md in list_midi_inputs():
-                label = f"MIDI: {md.name}"
-                self.device_selector.addItem(label)
-                self.device_map.append(("midi", {"name": md.name}))
-        except Exception as e:
-            QMessageBox.warning(self, "MIDI", f"No se pudieron listar dispositivos MIDI: {e}")
+    # MIDI eliminado
 
         # restore selection
         sel = self.config.data.get('selected_device', {"type": "keyboard"})
@@ -223,60 +311,57 @@ class MainWindow(QWidget):
                     break
 
     def _on_device_changed(self, idx: int):
-        # Toggle MIDI options visibility
         if 0 <= idx < len(self.device_map):
             dtype, _ = self.device_map[idx]
-            self.midi_group.setVisible(dtype == 'midi')
+            if has_listeners():
+                log(f"Dispositivo seleccionado idx={idx} tipo={dtype}")
         else:
-            self.midi_group.setVisible(False)
+            if has_listeners():
+                log(f"Dispositivo seleccionado inválido idx={idx}")
 
     def _browse_audio(self, row_idx: int):
-        # Pause listening while browsing to avoid accidental triggers
         self._was_listening = self.listener.is_running if self.listener else False
         self._stop_listening()
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Selecciona archivo de audio",
-            filter="Audio Files (*.wav *.mp3 *.ogg *.flac);;All Files (*.*)",
-        )
+        path, _ = QFileDialog.getOpenFileName(self, "Selecciona archivo de audio", filter="Audio Files (*.wav *.mp3 *.ogg *.flac);;All Files (*.*)")
         if path:
-            self.rows[row_idx]['audio_path'] = path
-            self.rows[row_idx]['audio_edit'].setText(path)
-        # Resume previous listening state without applying
+            item = self.mapping_manager.get_by_row(row_idx)
+            if item:
+                item.audio = path
+                self._refresh_row(row_idx, item)
+                self._update_duplicate_highlight()
         self._resume_listening_if_needed()
 
     def _map_row(self, row_idx: int):
-        # Pause any current listening during capture
         self._was_listening = self.listener.is_running if self.listener else False
         self._stop_listening()
-
+        item = self.mapping_manager.get_by_row(row_idx)
+        if not item:
+            return
         dtype, dinfo = self.device_map[self.device_selector.currentIndex()]
         tmp_listener = MultiDeviceListener() if dtype == 'all' else DeviceListener(dtype, dinfo)
-        # Keep a strong reference while capturing
         self._capture_listener = tmp_listener
-        self.rows[row_idx]['key_edit'].setText("Escuchando...")
-        # Disable map button to avoid multiple concurrent captures
-        self.rows[row_idx]['map_btn'].setEnabled(False)
-
+        self._set_status(f"Capturando fila {row_idx+1}... presiona combinación")
         def on_captured(sig: EventSignature):
-            # Ensure the temporary listener stops (important for HID)
             try:
                 tmp_listener.stop()
             except Exception:
                 pass
-            # Emit to main thread for UI update
-            self.capture_ready.emit(row_idx, sig)
-
+            item.signature = sig
+            self._refresh_row(row_idx, item)
+            self._update_duplicate_highlight()
+            self._capture_listener = None
+            self._set_status(f"Captura fila {row_idx+1}: {sig.human}")
+            self._resume_listening_if_needed()
+            if has_listeners():
+                log(f"Captura completada fila={row_idx+1} sig={sig.type}:{sig.code}")
         tmp_listener.capture_next(on_captured)
         try:
             tmp_listener.start()
         except Exception as e:
-            QMessageBox.critical(self, "Escucha", f"No se pudo iniciar escucha: {e}")
+            QMessageBox.critical(self, "Captura", f"No se pudo iniciar: {e}")
             self._capture_listener = None
-            self.rows[row_idx]['map_btn'].setEnabled(True)
+            self._resume_listening_if_needed()
             return
-
-        # Safety timeout: if nothing is captured within 8s, cancel capture
         def on_timeout():
             if self._capture_listener is tmp_listener:
                 try:
@@ -284,25 +369,14 @@ class MainWindow(QWidget):
                 except Exception:
                     pass
                 self._capture_listener = None
-                self.rows[row_idx]['key_edit'].setText("")
-                self.rows[row_idx]['map_btn'].setEnabled(True)
-                QMessageBox.information(self, "Mapeo", "No se detectó ninguna tecla/botón. Intenta de nuevo.")
-            # Resume previous listening if it was active
-            self._resume_listening_if_needed()
+                self._set_status("Captura cancelada (timeout)")
+                QMessageBox.information(self, "Captura", "No se detectó ninguna entrada.")
+                self._resume_listening_if_needed()
         QTimer.singleShot(8000, on_timeout)
 
     def _on_capture_ready(self, row_idx: int, sig: EventSignature):
-        # Update UI with captured signature on main thread
-        try:
-            self.rows[row_idx]['signature'] = sig
-            self.rows[row_idx]['key_edit'].setText(sig.human)
-        except Exception:
-            pass
-        finally:
-            self.rows[row_idx]['map_btn'].setEnabled(True)
-            self._capture_listener = None
-            # Resume previous listening state without applying new mappings yet
-            self._resume_listening_if_needed()
+        # Legacy (no-op with new table approach)
+        pass
 
     def _apply_changes(self):
         # stop existing listener
@@ -312,36 +386,35 @@ class MainWindow(QWidget):
 
         # build mapping (signature + audio only)
         mapping = []
-        for row in self.rows:
-            sig = row['signature']
-            path = row['audio_path']
-            if sig and path:
-                mapping.append({'signature': sig.to_dict(), 'audio': path})
+        for m in self.mapping_manager.items():
+            if m.signature and m.audio:
+                mapping.append({'signature': m.signature.to_dict(), 'audio': m.audio})
         self.audio.preload([m['audio'] for m in mapping])
 
         dtype, dinfo = self.device_map[self.device_selector.currentIndex()]
-        # Attach midi options if needed
-        if dtype == 'midi':
-            dinfo = {**dinfo, **self._current_midi_options()}
         if dtype == 'all':
             self.listener = MultiDeviceListener()
         else:
             self.listener = DeviceListener(dtype, dinfo)
         for m in mapping:
-            def make_cb(p):
-                return lambda: self.audio.play(p)
-            self.listener.bind(EventSignature.from_dict(m['signature']), make_cb(m['audio']))
+            sig = EventSignature.from_dict(m['signature'])
+            audio_path = m['audio']
+            self.listener.bind(sig, lambda p=audio_path: self.audio.play(p))
 
         # save config
         self.config.data['selected_device'] = {'type': dtype, **dinfo}
-        if dtype == 'midi':
-            self.config.data['midi_options'] = self._current_midi_options()
         self.config.data['mappings'] = mapping
         self.config.save()
 
         # Auto-start listening after applying
         self._start_listening()
         QMessageBox.information(self, "Aplicado", "Mapeos aplicados y escucha iniciada.")
+        # Log action
+        try:
+            from src.core.logger import log
+            log('Mapeos aplicados y escucha iniciada')
+        except Exception:
+            pass
 
     def _start_listening(self):
         if not self.listener:
@@ -382,35 +455,19 @@ class MainWindow(QWidget):
 
     def _load_config(self):
         data = self.config.data
-        # restore mappings
         rows = data.get('mappings', [])
-        # Ensure enough rows exist
-        while len(self.rows) < len(rows):
-            self._add_row()
-        for i, item in enumerate(rows):
-            try:
-                sig = EventSignature.from_dict(item['signature'])
-                self.rows[i]['signature'] = sig
-                self.rows[i]['key_edit'].setText(sig.human)
-                audio_val = item.get('audio', '')
-                self.rows[i]['audio_path'] = audio_val
-                if self.rows[i].get('audio_edit'):
-                    self.rows[i]['audio_edit'].setText(audio_val)
-            except Exception:
-                pass
-        # Restore MIDI options
-        midi_opts = data.get('midi_options', {})
-        self.chk_midi_velocity.setChecked(midi_opts.get('velocity', True))
-        self.chk_midi_ignore_same_cc.setChecked(midi_opts.get('ignore_same_cc', True))
-        self.chk_midi_filter_notes.setChecked(midi_opts.get('filter_notes', True))
-        self.chk_midi_filter_cc.setChecked(midi_opts.get('filter_cc', True))
-        self.spin_midi_timeout.setValue(int(midi_opts.get('timeout_ms', 800)))
+        self.mapping_manager.load(rows)
+        self.table.setRowCount(0)
+        for item in self.mapping_manager.items():
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            self._refresh_row(r, item)
+        self._update_duplicate_highlight()
+    # MIDI opciones eliminadas
 
-    def _current_midi_options(self):
-        return {
-            'velocity': self.chk_midi_velocity.isChecked(),
-            'ignore_same_cc': self.chk_midi_ignore_same_cc.isChecked(),
-            'filter_notes': self.chk_midi_filter_notes.isChecked(),
-            'filter_cc': self.chk_midi_filter_cc.isChecked(),
-            'timeout_ms': self.spin_midi_timeout.value(),
-        }
+    # _current_midi_options removido
+
+    def _set_status(self, msg: str):
+        if has_listeners():
+            log(msg)
+        # Optional: could add a status bar later

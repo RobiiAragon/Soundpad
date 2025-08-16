@@ -3,6 +3,10 @@ import sys
 from typing import Callable, Dict, Optional
 
 from .types import EventSignature
+try:
+    from . import logger as _central_logger
+except Exception:  # pragma: no cover
+    _central_logger = None
 
 
 try:
@@ -16,10 +20,7 @@ try:
 except Exception:  # pragma: no cover
     hid = None
 
-try:
-    import mido
-except Exception:  # pragma: no cover
-    mido = None
+# MIDI support removed
 
 
 Callback = Callable[[], None]
@@ -27,25 +28,25 @@ Callback = Callable[[], None]
 
 class DeviceListener:
     def __init__(self, dtype: str, dinfo: Dict):
-            # Device meta
-            self.dtype = dtype  # 'hid' | 'keyboard' | 'mouse'
-            self.dinfo = dinfo
-            # State
-            self.is_running = False
-            self._bindings = {}
-            self._capture_callback = None
-            self._thread = None
-            self._stop_event = threading.Event()
-            # Underlying listeners/handles
-            self._hid_device = None
-            self._kb_listener = None
-            self._mouse_listener = None
-            # Keyboard combo state
-            self._pressed_keys = set()
-            self._fired_combos = set()
-            # Capture helpers
-            self._capture_keys = set()
-            self._capture_timer = None
+        # Device meta
+        self.dtype = dtype  # 'hid' | 'keyboard' | 'mouse'
+        self.dinfo = dinfo
+        # State
+        self.is_running = False
+        self._bindings: Dict[str, Callback] = {}
+        self._capture_callback = None
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        # Underlying listeners/handles
+        self._hid_device = None
+        self._kb_listener = None
+        self._mouse_listener = None
+        # Keyboard combo state
+        self._pressed_keys = set()
+        self._fired_combos = set()
+        # Capture helpers
+        self._capture_keys = set()
+        self._capture_timer = None
 
     def bind(self, sig: EventSignature, cb: Callback):
         self._bindings[self._sig_key(sig)] = cb
@@ -57,7 +58,6 @@ class DeviceListener:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         self.is_running = True
-
     def stop(self):
         self._stop_event.set()
         if self._kb_listener:
@@ -78,7 +78,6 @@ class DeviceListener:
             except Exception:
                 pass
             self._hid_device = None
-        # Cancel capture timer if any
         if self._capture_timer:
             try:
                 self._capture_timer.cancel()
@@ -88,7 +87,6 @@ class DeviceListener:
         self.is_running = False
 
     def capture_next(self, callback: Callable[[EventSignature], None]):
-        # Start a short-lived listener to capture 1st event
         self._capture_callback = callback
 
     def _emit_capture(self, sig: EventSignature):
@@ -101,19 +99,23 @@ class DeviceListener:
         return f"{sig.type}:{sig.vendor_id}:{sig.product_id}:{sig.code}"
 
     def _run(self):
-        if self.dtype == 'keyboard':
-            self._run_keyboard()
-        elif self.dtype == 'mouse':
-            self._run_mouse()
-        elif self.dtype == 'hid':
-            self._run_hid()
-        elif self.dtype == 'midi':
-            self._run_midi()
+        try:
+            if self.dtype == 'keyboard':
+                self._run_keyboard()
+            elif self.dtype == 'mouse':
+                self._run_mouse()
+            elif self.dtype == 'hid':
+                self._run_hid()
+        except Exception as e:  # Robust guard
+            if _central_logger and _central_logger.has_listeners():
+                _central_logger.log(f"[listener] error {self.dtype}: {e}")
+            import traceback
+            traceback.print_exc()
+    # MIDI removido
 
     def _run_keyboard(self):
         if not keyboard:
             return
-        # Normalization helper
         def norm_key(k) -> str:
             try:
                 if hasattr(k, 'char') and k.char:
@@ -156,6 +158,8 @@ class DeviceListener:
                 cb = self._bindings.get(self._sig_key(legacy_sig))
             if cb:
                 cb()
+                if _central_logger and _central_logger.has_listeners():
+                    _central_logger.log(f"[keyboard] trigger code={code} human={human}")
 
         def finalize_capture():
             self._capture_timer = None
@@ -169,7 +173,10 @@ class DeviceListener:
             human = humanize_combo(keys)
             sig = EventSignature(type='keyboard', code=code, human=human)
             try:
-                print(f"[capture] keyboard: {code}", file=sys.stdout, flush=True)
+                msg = f"[capture] keyboard: {code}"
+                print(msg, file=sys.stdout, flush=True)
+                if _central_logger:
+                    _central_logger.log(msg)
             except Exception:
                 pass
             self._capture_keys.clear()
@@ -192,42 +199,46 @@ class DeviceListener:
             self._capture_timer.start()
 
         def on_press(k):
-            name = norm_key(k)
-            # Capture mode (collect combination)
-            if self._capture_callback:
-                self._capture_keys.add(name)
-                schedule_finalize_capture()
-                return
-            # Normal listening mode
-            self._pressed_keys.add(name)
-            keys_sorted = sorted(self._pressed_keys)
-            code = combo_code(keys_sorted)
-            # Avoid re-firing same combo while held
-            if code not in self._fired_combos:
-                human = humanize_combo(keys_sorted)
-                fire_if_bound(code, human)
-                self._fired_combos.add(code)
-            # Additionally, for single key mapping ensure still works when part of larger combo
-            if len(keys_sorted) > 1 and name not in ['shift', 'ctrl', 'alt', 'meta']:
-                # Single key mapping if present and not already fired (store single as separate code)
-                single_code = name
-                if single_code not in self._fired_combos:
-                    human = humanize_combo([name])
-                    fire_if_bound(single_code, human)
-                    self._fired_combos.add(single_code)
+            try:
+                name = norm_key(k)
+                if _central_logger and _central_logger.has_listeners():
+                    _central_logger.log(f"[keyboard] press {name}")
+                if self._capture_callback:
+                    self._capture_keys.add(name)
+                    schedule_finalize_capture()
+                    return
+                self._pressed_keys.add(name)
+                keys_sorted = sorted(self._pressed_keys)
+                code = combo_code(keys_sorted)
+                if code not in self._fired_combos:
+                    human = humanize_combo(keys_sorted)
+                    fire_if_bound(code, human)
+                    self._fired_combos.add(code)
+                if len(keys_sorted) > 1 and name not in ['shift', 'ctrl', 'alt', 'meta']:
+                    single_code = name
+                    if single_code not in self._fired_combos:
+                        human = humanize_combo([name])
+                        fire_if_bound(single_code, human)
+                        self._fired_combos.add(single_code)
+            except Exception as e:
+                if _central_logger and _central_logger.has_listeners():
+                    _central_logger.log(f"[keyboard] error on_press: {e}")
 
         def on_release(k):
-            name = norm_key(k)
-            if name in self._pressed_keys:
-                self._pressed_keys.remove(name)
-            # Remove fired combos that include this key
-            to_remove = [c for c in self._fired_combos if name in c.split('+')]
-            for c in to_remove:
-                self._fired_combos.remove(c)
-            # If in capture (user released before timeout) keep waiting for timer unless no keys
-            if self._capture_callback and not self._capture_keys:
-                # Nothing pressed anymore, finalize early
-                finalize_capture()
+            try:
+                name = norm_key(k)
+                if _central_logger and _central_logger.has_listeners():
+                    _central_logger.log(f"[keyboard] release {name}")
+                if name in self._pressed_keys:
+                    self._pressed_keys.remove(name)
+                to_remove = [c for c in self._fired_combos if name in c.split('+')]
+                for c in to_remove:
+                    self._fired_combos.remove(c)
+                if self._capture_callback and not self._capture_keys:
+                    finalize_capture()
+            except Exception as e:
+                if _central_logger and _central_logger.has_listeners():
+                    _central_logger.log(f"[keyboard] error on_release: {e}")
 
         self._kb_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         self._kb_listener.start()
@@ -268,6 +279,8 @@ class DeviceListener:
             cb = self._bindings.get(self._sig_key(sig))
             if cb:
                 cb()
+                if _central_logger and _central_logger.has_listeners():
+                    _central_logger.log(f"[mouse] trigger code={code} human={human}")
 
         def finalize_capture():
             capture_timer['timer'] = None
@@ -279,7 +292,10 @@ class DeviceListener:
             code = combo_code(btns)
             sig = EventSignature(type='mouse', code=code, human=humanize(btns))
             try:
-                print(f"[capture] mouse: {code}", file=sys.stdout, flush=True)
+                msg = f"[capture] mouse: {code}"
+                print(msg, file=sys.stdout, flush=True)
+                if _central_logger:
+                    _central_logger.log(msg)
             except Exception:
                 pass
             capture_buttons.clear()
@@ -304,6 +320,8 @@ class DeviceListener:
 
         def on_click(x, y, button, pressed):
             name = norm_btn(button)
+            if _central_logger and _central_logger.has_listeners():
+                _central_logger.log(f"[mouse] {'down' if pressed else 'up'} {name} @ {x},{y}")
             if self._capture_callback:
                 if pressed:
                     capture_buttons.add(name)
@@ -338,9 +356,28 @@ class DeviceListener:
             return
         vid = self.dinfo.get('vendor_id')
         pid = self.dinfo.get('product_id')
+        import os
+        debug_hid = os.getenv('SP_DEBUG_HID') == '1'
         dev = None
-        for d in hid.HidDeviceFilter(vendor_id=vid, product_id=pid).get_devices():
+        candidates = list(hid.HidDeviceFilter(vendor_id=vid, product_id=pid).get_devices())
+        # Prefer keyboard interface (usage_page 0x01, usage 0x06) if available
+        preferred = []
+        for d in candidates:
+            try:
+                for col in getattr(d, 'top_level_collections', []) or []:
+                    if getattr(col, 'usage_page', None) == 0x01 and getattr(col, 'usage', None) == 0x06:
+                        preferred.append(d)
+                        break
+            except Exception:
+                pass
+        search_order = preferred + [c for c in candidates if c not in preferred]
+        for d in search_order:
             dev = d
+            if debug_hid:
+                try:
+                    print(f"[hid] Seleccionado dispositivo path={getattr(d,'device_path',None)} preferido={d in preferred}", flush=True)
+                except Exception:
+                    pass
             break
         if not dev:
             return
@@ -372,8 +409,15 @@ class DeviceListener:
             report_id = data[0]
             payload = bytes(data[1:])
             hex_code = f"{report_id:02X}-" + payload.hex().upper()
+            if _central_logger and _central_logger.has_listeners():
+                _central_logger.log(f"[hid] report id={report_id:02X} payload={payload.hex()}")
             last_update['time'] = time.time()
             cleanup_expired()
+            if debug_hid:
+                try:
+                    print(f"[hid] report id={report_id:02X} len={len(payload)} code={hex_code}", flush=True)
+                except Exception:
+                    pass
             # For capture, aggregate until idle window similar to keyboard (reuse timer approach simplified)
             if self._capture_callback:
                 pressed_codes.add(hex_code)
@@ -382,7 +426,10 @@ class DeviceListener:
                                      code='+'.join(sorted(pressed_codes)),
                                      human=make_human(pressed_codes))
                 try:
-                    print(f"[capture] hid: {sig.code}", file=sys.stdout, flush=True)
+                    msg = f"[capture] hid: {sig.code}"
+                    print(msg, file=sys.stdout, flush=True)
+                    if _central_logger:
+                        _central_logger.log(msg)
                 except Exception:
                     pass
                 self._emit_capture(sig)
@@ -408,181 +455,7 @@ class DeviceListener:
         except Exception:
             pass
 
-    def _run_midi(self):
-        if not mido:
-            return
-        # Choose specific device if provided (by name substring), else listen to all inputs
-        target_name = self.dinfo.get('name') if self.dinfo else None
-        opt_velocity = bool(self.dinfo.get('velocity', True))
-        opt_ignore_same_cc = bool(self.dinfo.get('ignore_same_cc', True))
-        opt_filter_notes = bool(self.dinfo.get('filter_notes', True))
-        opt_filter_cc = bool(self.dinfo.get('filter_cc', True))
-        timeout_ms = int(self.dinfo.get('timeout_ms', 800))
-
-        try:
-            input_names = mido.get_input_names()
-        except Exception:
-            return
-
-        inputs = []
-        for name in input_names:
-            if target_name and target_name not in name:
-                continue
-            try:
-                inputs.append(mido.open_input(name))
-            except Exception:
-                continue
-        if not inputs:
-            return
-
-        pressed = set()
-        fired = set()
-        import time
-        last_activity = {'t': time.time()}
-
-        def cleanup():
-            if time.time() - last_activity['t'] > (timeout_ms / 1000.0):
-                pressed.clear()
-                fired.clear()
-
-        def make_code():
-            return '+'.join(sorted(pressed))
-
-        def make_human():
-            items = sorted(pressed)
-            if not items:
-                return 'MIDI'
-            if len(items) == 1:
-                return f"MIDI {items[0]}"
-            return 'MIDI Combo ' + '+'.join(items)
-
-        def fire():
-            code = make_code()
-            human = make_human()
-            if not code:
-                return
-            sig = EventSignature(type='midi', code=code, human=human)
-            cb = self._bindings.get(self._sig_key(sig))
-            if cb and code not in fired:
-                cb()
-                fired.add(code)
-
-        # Capture support (collect combo then emit once)
-        capture_tokens = set()
-        capture_timer = {'t': None}
-
-        def finalize_capture():
-            capture_timer['t'] = None
-            if not self._capture_callback:
-                return
-            code = '+'.join(sorted(capture_tokens)) or ''
-            if not code:
-                return
-            human = 'MIDI ' + ('Combo ' if len(capture_tokens) > 1 else '') + '+'.join(sorted(capture_tokens))
-            sig = EventSignature(type='midi', code=code, human=human)
-            try:
-                print(f"[capture] midi: {code}", file=sys.stdout, flush=True)
-            except Exception:
-                pass
-            capture_tokens.clear()
-            self._emit_capture(sig)
-            try:
-                for inp in inputs:
-                    inp.close()
-            except Exception:
-                pass
-
-        def schedule_finalize_capture():
-            if capture_timer['t']:
-                try:
-                    capture_timer['t'].cancel()
-                except Exception:
-                    pass
-            t = threading.Timer(0.7, finalize_capture)
-            t.daemon = True
-            t.start()
-            capture_timer['t'] = t
-
-        while not self._stop_event.is_set():
-            cleanup()
-            for inp in inputs:
-                try:
-                    for msg in inp.iter_pending():
-                        last_activity['t'] = time.time()
-                        token = None
-                        if msg.type in ('note_on', 'note_off') and opt_filter_notes:
-                            if msg.type == 'note_on' and msg.velocity > 0:
-                                token = f"note{msg.note}v{msg.velocity}" if opt_velocity else f"note{msg.note}"
-                                pressed.add(token)
-                                if self._capture_callback:
-                                    capture_tokens.add(token)
-                                    schedule_finalize_capture()
-                            else:
-                                token = f"note{msg.note}v{msg.velocity}" if opt_velocity else f"note{msg.note}"
-                                if token in pressed:
-                                    pressed.remove(token)
-                                if self._capture_callback and token in capture_tokens:
-                                    capture_tokens.remove(token)
-                                to_remove = [c for c in list(fired) if token in c.split('+')]
-                                for c in to_remove:
-                                    fired.remove(c)
-                                if not self._capture_callback:
-                                    continue
-                                else:
-                                    schedule_finalize_capture()
-                                    continue
-                        elif msg.type in ('control_change',) and opt_filter_cc:
-                            token = f"cc{msg.control}:{msg.value}"
-                            if opt_ignore_same_cc:
-                                existing = [p for p in pressed if p.startswith(f"cc{msg.control}:")]
-                                if existing and any(p == token for p in existing):
-                                    # already same value
-                                    if self._capture_callback:
-                                        capture_tokens.add(token)
-                                        schedule_finalize_capture()
-                                    continue
-                                for p in existing:
-                                    if p != token:
-                                        try:
-                                            pressed.remove(p)
-                                        except KeyError:
-                                            pass
-                            pressed.add(token)
-                            if self._capture_callback:
-                                capture_tokens.add(token)
-                                schedule_finalize_capture()
-                        elif msg.type in ('program_change',):
-                            token = f"pc{msg.program}"
-                            pressed.add(token)
-                            if self._capture_callback:
-                                capture_tokens.add(token)
-                                schedule_finalize_capture()
-                        elif msg.type in ('pitchwheel',):
-                            token = f"pw{msg.pitch}"
-                            pressed.add(token)
-                            if self._capture_callback:
-                                capture_tokens.add(token)
-                                schedule_finalize_capture()
-                        else:
-                            continue
-                        if not self._capture_callback:
-                            fire()
-                except Exception:
-                    continue
-            self._stop_event.wait(0.02)
-
-        # If capture was armed but nothing arrived, just exit
-        if self._capture_callback:
-            try:
-                finalize_capture()
-            except Exception:
-                pass
-
-        for inp in inputs:
-            try:
-                inp.close()
-            except Exception:
-                pass
+    # _run_midi removed
 
 
 class MultiDeviceListener:
@@ -596,13 +469,7 @@ class MultiDeviceListener:
         # Always include global keyboard and mouse
         self._listeners.append(DeviceListener('keyboard', {}))
         self._listeners.append(DeviceListener('mouse', {}))
-        # Add all MIDI inputs if available
-        try:
-            from .midi_devices import list_midi_inputs
-            for md in list_midi_inputs():
-                self._listeners.append(DeviceListener('midi', {'name': md.name}))
-        except Exception:
-            pass
+    # MIDI listeners removidos
 
         # Include all HID devices available at construction time
         try:

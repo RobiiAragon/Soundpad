@@ -19,8 +19,13 @@ def list_hid_devices() -> List[HidDeviceInfo]:
     devices: List[HidDeviceInfo] = []
     if not hid:
         return devices
+    seen = set()
     for d in hid.HidDeviceFilter().get_devices():
         try:
+            key = (d.vendor_id, d.product_id)
+            if key in seen:
+                continue
+            seen.add(key)
             devices.append(HidDeviceInfo(
                 vendor_id=d.vendor_id,
                 product_id=d.product_id,

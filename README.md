@@ -1,9 +1,9 @@
 # USB Sound Mapper
 
-Map USB device buttons (MIDI, keyboards, mouses, HID gamepads) to play sounds on Windows.
+Map USB device buttons (keyboards, mouse, HID gamepads) to play sounds on Windows.
 
 Features:
-- Select a MIDI/USB/HID device or use global keyboard/mouse hooks
+- Select a HID device or use global keyboard/mouse hooks
 - Map up to 10 buttons/keys to audio files (WAV/MP3/OGG, etc.)
 - Runs in background with a system tray icon
 - Saves your mappings to a config file in %APPDATA%
@@ -30,3 +30,5 @@ python -m src.app
 - For some HID devices, reading raw reports may require elevated permissions.
 - If a device can't be opened via HID, use the "Global Keyboard" or "Global Mouse" options.
 - Audio playback uses pygame.mixer.
+
+MIDI support fue retirado en esta versión para simplificar.
