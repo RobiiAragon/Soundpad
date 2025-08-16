@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QStyle, QToolButton, QMenu
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt6.QtGui import QCursor  # (usar en futuro si se necesita; QIcon eliminado)
 
 from src.core.config_store import ConfigStore
 from src.core.audio_player import AudioPlayer
@@ -46,79 +47,72 @@ class MainWindow(QWidget):
         self.capture_ready.connect(self._on_capture_ready)
 
     def _build_ui(self):
-    layout = QVBoxLayout()
+        # Delegar a helper estable para evitar problemas de indentación
+        self._init_ui_core()
 
-    # Title / device selector
-    layout.addWidget(QLabel("Selecciona dispositivo (HID/Global)"))
-    self.device_selector = QComboBox()
-    device_row = QHBoxLayout()
-    device_row.addWidget(self.device_selector)
-    self.refresh_devices_btn = QPushButton("Refrescar dispositivos")
-    self.log_chk = QCheckBox("Log")
-    device_row.addWidget(self.refresh_devices_btn)
-    device_row.addWidget(self.log_chk)
-    device_row.addStretch(1)
-    layout.addLayout(device_row)
+    def _init_ui_core(self):
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Selecciona dispositivo (HID/Global)"))
+        self.device_selector = QComboBox()
+        device_row = QHBoxLayout()
+        device_row.addWidget(self.device_selector)
+        self.refresh_devices_btn = QPushButton("Refrescar dispositivos")
+        self.log_chk = QCheckBox("Log")
+        device_row.addWidget(self.refresh_devices_btn)
+        device_row.addWidget(self.log_chk)
+        device_row.addStretch(1)
+        layout.addLayout(device_row)
 
-    # Mapping table
-    self.mapping_manager = MappingManager()
-    self.table = QTableWidget(0, 4)
-    self.table.setHorizontalHeaderLabels(["#", "Evento", "Audio", "Acciones"])
-    self.table.verticalHeader().setVisible(False)
-    # Selección por celda (la columna de acciones tiene widgets y no queremos resaltado)
-    self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
-    self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-    self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-    self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-    self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-    self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-    self.table.setAlternatingRowColors(True)
-    self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    layout.addWidget(self.table)
+        self.mapping_manager = MappingManager()
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["#", "Evento", "Audio", "Acciones"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setAlternatingRowColors(True)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        layout.addWidget(self.table)
 
-    # Row management buttons
-    row_controls = QHBoxLayout()
-    self.add_row_btn = QPushButton("Añadir")
-    self.remove_row_btn = QPushButton("Eliminar")
-    self.dup_btn = QPushButton("Duplicados")
-    row_controls.addWidget(self.add_row_btn)
-    row_controls.addWidget(self.remove_row_btn)
-    row_controls.addWidget(self.dup_btn)
-    row_controls.addStretch(1)
-    layout.addLayout(row_controls)
+        row_controls = QHBoxLayout()
+        self.add_row_btn = QPushButton("Añadir")
+        self.remove_row_btn = QPushButton("Eliminar")
+        self.dup_btn = QPushButton("Duplicados")
+        row_controls.addWidget(self.add_row_btn)
+        row_controls.addWidget(self.remove_row_btn)
+        row_controls.addWidget(self.dup_btn)
+        row_controls.addStretch(1)
+        layout.addLayout(row_controls)
 
-    # Action buttons
-    self.apply_btn = QPushButton("Aplicar / Reiniciar escucha")
-    self.toggle_listen_btn = QPushButton("Iniciar escucha")
-    layout.addWidget(self.apply_btn)
-    layout.addWidget(self.toggle_listen_btn)
+        self.apply_btn = QPushButton("Aplicar / Reiniciar escucha")
+        self.toggle_listen_btn = QPushButton("Iniciar escucha")
+        layout.addWidget(self.apply_btn)
+        layout.addWidget(self.toggle_listen_btn)
 
-    # Connections
-    self.device_selector.currentIndexChanged.connect(self._on_device_changed)
-    self.apply_btn.clicked.connect(self._apply_changes)
-    self.toggle_listen_btn.clicked.connect(self._toggle_listening)
-    self.add_row_btn.clicked.connect(self._add_row)
-    self.remove_row_btn.clicked.connect(self._remove_selected_row)
-    self.dup_btn.clicked.connect(self._show_duplicates)
-    self.refresh_devices_btn.clicked.connect(self._populate_devices)
-    self.log_chk.stateChanged.connect(self._on_log_toggle)
+        self.device_selector.currentIndexChanged.connect(self._on_device_changed)
+        self.apply_btn.clicked.connect(self._apply_changes)
+        self.toggle_listen_btn.clicked.connect(self._toggle_listening)
+        self.add_row_btn.clicked.connect(self._add_row)
+        self.remove_row_btn.clicked.connect(self._remove_selected_row)
+        self.dup_btn.clicked.connect(self._show_duplicates)
+        self.refresh_devices_btn.clicked.connect(self._populate_devices)
+        self.log_chk.stateChanged.connect(self._on_log_toggle)
 
-    # Tabs (main + log)
-    self.tabs = QTabWidget()
-    self.main_tab = QWidget()
-    self.main_tab.setLayout(layout)
-    self.log_view = QTextEdit()
-    self.log_view.setReadOnly(True)
-    self.tabs.addTab(self.main_tab, "Principal")
-    self.tabs.addTab(self.log_view, "Log")
-    outer = QVBoxLayout()
-    outer.addWidget(self.tabs)
-    # status label
-    self.status_lbl = QLineEdit()
-    self.status_lbl.setReadOnly(True)
-    self.status_lbl.setPlaceholderText("Listo")
-    outer.addWidget(self.status_lbl)
-    self.setLayout(outer)
+        self.tabs = QTabWidget()
+        self.main_tab = QWidget(); self.main_tab.setLayout(layout)
+        self.log_view = QTextEdit(); self.log_view.setReadOnly(True)
+        self.tabs.addTab(self.main_tab, "Principal")
+        self.tabs.addTab(self.log_view, "Log")
+        outer = QVBoxLayout(); outer.addWidget(self.tabs)
+        self.status_lbl = QLineEdit(); self.status_lbl.setReadOnly(True); self.status_lbl.setPlaceholderText("Listo")
+        outer.addWidget(self.status_lbl)
+        self.setLayout(outer)
+
+    # Selección desactivada: no se normalizan colores
 
     def _apply_styles(self):
         # Simple dark theme to ensure text contrast (labels/items were blending)
@@ -208,27 +202,14 @@ QTabBar::tab:selected { background: #3a3d41; }
         self._refresh_row(row, item)
 
     def _refresh_row(self, row: int, item: MappingItem):
-    # Column 0: index
-    idx_item = QTableWidgetItem(str(row + 1))
-    idx_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-    self.table.setItem(row, 0, idx_item)
+        # Wrapper to avoid indentation issues in original method body
+        self._do_refresh_row(row, item)
 
-    # Column 1: event signature
-    ev_text = item.signature.human if item.signature else "<sin evento>"
-    ev_item = QTableWidgetItem(ev_text)
-    ev_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-    ev_item.setToolTip(ev_text)
-    self.table.setItem(row, 1, ev_item)
+    def _do_refresh_row(self, row: int, item: MappingItem): self._build_row(row, item)
 
-    # Column 2: audio path
-    audio_text = item.audio if item.audio else "<sin audio>"
-    audio_item = QTableWidgetItem(audio_text)
-    audio_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-    audio_item.setToolTip(audio_text)
-    self.table.setItem(row, 2, audio_item)
-
-    # Ensure action buttons (column 3) exist
-    self._ensure_action_widgets(row)
+    def _build_row(self, row: int, item: MappingItem):
+        # Wrapper interno que delega a función global para evitar errores de indentación en build
+        build_row(self, row, item)
 
     def _ensure_action_widgets(self, row: int):
         if self.table.cellWidget(row, 3) is not None:
@@ -265,7 +246,11 @@ QTabBar::tab:selected { background: #3a3d41; }
             self._set_status(f"Reproduciendo preview fila {row+1}")
 
     def _remove_selected_row(self):
-        row = self.table.currentRow()
+        # Con selección desactivada, tomamos la última fila como objetivo
+        if self.table.selectionMode() == QAbstractItemView.SelectionMode.NoSelection:
+            row = self.table.rowCount() - 1
+        else:
+            row = self.table.currentRow()
         if row < 0:
             return
         item = self.mapping_manager.get_by_row(row)
@@ -538,3 +523,28 @@ QTabBar::tab:selected { background: #3a3d41; }
                 self.status_lbl.setText(msg)
         except Exception:
             pass
+
+# --- Función helper fuera de la clase (evita problemas de indentación en pyinstaller) ---
+def build_row(win: MainWindow, row: int, item: MappingItem):
+    # Column 0: index
+    idx_item = QTableWidgetItem(str(row + 1))
+    idx_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+    win.table.setItem(row, 0, idx_item)
+
+    # Column 1: event signature
+    ev_text = item.signature.human if item.signature else "<sin evento>"
+    ev_item = QTableWidgetItem(ev_text)
+    ev_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+    ev_item.setToolTip(ev_text)
+    win.table.setItem(row, 1, ev_item)
+
+    # Column 2: audio path
+    audio_text = item.audio if item.audio else "<sin audio>"
+    audio_item = QTableWidgetItem(audio_text)
+    audio_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+    audio_item.setToolTip(audio_text)
+    win.table.setItem(row, 2, audio_item)
+
+    # Column 3: ensure action buttons
+    win._ensure_action_widgets(row)
+    # Selección desactivada: nada adicional
