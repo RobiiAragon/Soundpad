@@ -4,7 +4,7 @@ from typing import Literal, Optional, Dict, Any
 
 @dataclass
 class EventSignature:
-    type: Literal['hid', 'keyboard', 'mouse']
+    type: Literal['hid', 'keyboard', 'mouse', 'multi']
     # For HID: vendor_id, product_id, and raw pattern (hex string)
     vendor_id: Optional[int] = None
     product_id: Optional[int] = None
