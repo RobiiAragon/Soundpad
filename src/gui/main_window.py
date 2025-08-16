@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QApplication,
     QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QFileDialog, QGridLayout,
-    QLineEdit, QMessageBox, QSystemTrayIcon, QHBoxLayout
+    QLineEdit, QMessageBox, QSystemTrayIcon, QHBoxLayout, QCheckBox, QSpinBox, QGroupBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
@@ -56,6 +56,29 @@ class MainWindow(QWidget):
             self._add_row()
 
         layout.addLayout(self.grid)
+
+        # MIDI advanced options (hidden unless MIDI device selected)
+        self.midi_group = QGroupBox("Opciones MIDI")
+        midi_layout = QHBoxLayout()
+        self.chk_midi_velocity = QCheckBox("Incluir velocidad en notas")
+        self.chk_midi_ignore_same_cc = QCheckBox("Ignorar CC repetidos")
+        self.chk_midi_filter_notes = QCheckBox("Notas")
+        self.chk_midi_filter_cc = QCheckBox("CC")
+        self.spin_midi_timeout = QSpinBox()
+        self.spin_midi_timeout.setRange(50, 5000)
+        self.spin_midi_timeout.setSingleStep(50)
+        self.spin_midi_timeout.setSuffix(" ms timeout")
+        midi_layout.addWidget(self.chk_midi_velocity)
+        midi_layout.addWidget(self.chk_midi_ignore_same_cc)
+        midi_layout.addWidget(QLabel("Tipos:"))
+        midi_layout.addWidget(self.chk_midi_filter_notes)
+        midi_layout.addWidget(self.chk_midi_filter_cc)
+        midi_layout.addWidget(QLabel("Combo timeout:"))
+        midi_layout.addWidget(self.spin_midi_timeout)
+        midi_layout.addStretch(1)
+        self.midi_group.setLayout(midi_layout)
+        self.midi_group.setVisible(False)
+        layout.addWidget(self.midi_group)
 
         # Botones para agregar/quitar filas
         row_controls = QHBoxLayout()
@@ -200,8 +223,12 @@ class MainWindow(QWidget):
                     break
 
     def _on_device_changed(self, idx: int):
-        # Settings will be applied on Apply
-        pass
+        # Toggle MIDI options visibility
+        if 0 <= idx < len(self.device_map):
+            dtype, _ = self.device_map[idx]
+            self.midi_group.setVisible(dtype == 'midi')
+        else:
+            self.midi_group.setVisible(False)
 
     def _browse_audio(self, row_idx: int):
         # Pause listening while browsing to avoid accidental triggers
@@ -293,6 +320,9 @@ class MainWindow(QWidget):
         self.audio.preload([m['audio'] for m in mapping])
 
         dtype, dinfo = self.device_map[self.device_selector.currentIndex()]
+        # Attach midi options if needed
+        if dtype == 'midi':
+            dinfo = {**dinfo, **self._current_midi_options()}
         if dtype == 'all':
             self.listener = MultiDeviceListener()
         else:
@@ -304,6 +334,8 @@ class MainWindow(QWidget):
 
         # save config
         self.config.data['selected_device'] = {'type': dtype, **dinfo}
+        if dtype == 'midi':
+            self.config.data['midi_options'] = self._current_midi_options()
         self.config.data['mappings'] = mapping
         self.config.save()
 
@@ -366,3 +398,19 @@ class MainWindow(QWidget):
                     self.rows[i]['audio_edit'].setText(audio_val)
             except Exception:
                 pass
+        # Restore MIDI options
+        midi_opts = data.get('midi_options', {})
+        self.chk_midi_velocity.setChecked(midi_opts.get('velocity', True))
+        self.chk_midi_ignore_same_cc.setChecked(midi_opts.get('ignore_same_cc', True))
+        self.chk_midi_filter_notes.setChecked(midi_opts.get('filter_notes', True))
+        self.chk_midi_filter_cc.setChecked(midi_opts.get('filter_cc', True))
+        self.spin_midi_timeout.setValue(int(midi_opts.get('timeout_ms', 800)))
+
+    def _current_midi_options(self):
+        return {
+            'velocity': self.chk_midi_velocity.isChecked(),
+            'ignore_same_cc': self.chk_midi_ignore_same_cc.isChecked(),
+            'filter_notes': self.chk_midi_filter_notes.isChecked(),
+            'filter_cc': self.chk_midi_filter_cc.isChecked(),
+            'timeout_ms': self.spin_midi_timeout.value(),
+        }

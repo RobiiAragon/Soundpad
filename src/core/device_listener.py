@@ -413,10 +413,17 @@ class DeviceListener:
             return
         # Choose specific device if provided (by name substring), else listen to all inputs
         target_name = self.dinfo.get('name') if self.dinfo else None
+        opt_velocity = bool(self.dinfo.get('velocity', True))
+        opt_ignore_same_cc = bool(self.dinfo.get('ignore_same_cc', True))
+        opt_filter_notes = bool(self.dinfo.get('filter_notes', True))
+        opt_filter_cc = bool(self.dinfo.get('filter_cc', True))
+        timeout_ms = int(self.dinfo.get('timeout_ms', 800))
+
         try:
             input_names = mido.get_input_names()
         except Exception:
             return
+
         inputs = []
         for name in input_names:
             if target_name and target_name not in name:
@@ -428,13 +435,13 @@ class DeviceListener:
         if not inputs:
             return
 
-        pressed = set()  # active notes/controls for combos
+        pressed = set()
         fired = set()
         import time
         last_activity = {'t': time.time()}
 
         def cleanup():
-            if time.time() - last_activity['t'] > 0.8:
+            if time.time() - last_activity['t'] > (timeout_ms / 1000.0):
                 pressed.clear()
                 fired.clear()
 
@@ -466,23 +473,31 @@ class DeviceListener:
                 try:
                     for msg in inp.iter_pending():
                         last_activity['t'] = time.time()
-                        # Normalize message into token
                         token = None
-                        if msg.type in ('note_on', 'note_off'):
+                        if msg.type in ('note_on', 'note_off') and opt_filter_notes:
                             if msg.type == 'note_on' and msg.velocity > 0:
-                                token = f"note{msg.note}"
+                                token = f"note{msg.note}v{msg.velocity}" if opt_velocity else f"note{msg.note}"
                                 pressed.add(token)
-                            else:  # note_off or zero velocity
-                                token = f"note{msg.note}"
+                            else:
+                                token = f"note{msg.note}v{msg.velocity}" if opt_velocity else f"note{msg.note}"
                                 if token in pressed:
                                     pressed.remove(token)
-                                # Remove fired combos including that token
                                 to_remove = [c for c in list(fired) if token in c.split('+')]
                                 for c in to_remove:
                                     fired.remove(c)
-                                continue  # don't fire on release
-                        elif msg.type in ('control_change',):
+                                continue
+                        elif msg.type in ('control_change',) and opt_filter_cc:
                             token = f"cc{msg.control}:{msg.value}"
+                            if opt_ignore_same_cc:
+                                existing = [p for p in pressed if p.startswith(f"cc{msg.control}:")]
+                                if existing and any(p == token for p in existing):
+                                    continue
+                                for p in existing:
+                                    if p != token:
+                                        try:
+                                            pressed.remove(p)
+                                        except KeyError:
+                                            pass
                             pressed.add(token)
                         elif msg.type in ('program_change',):
                             token = f"pc{msg.program}"
@@ -491,13 +506,12 @@ class DeviceListener:
                             token = f"pw{msg.pitch}"
                             pressed.add(token)
                         else:
-                            # Other message types ignored for mapping simplicity
                             continue
                         fire()
                 except Exception:
                     continue
             self._stop_event.wait(0.02)
-        # Cleanup
+
         for inp in inputs:
             try:
                 inp.close()
