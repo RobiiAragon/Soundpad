@@ -467,6 +467,42 @@ class DeviceListener:
                 cb()
                 fired.add(code)
 
+        # Capture support (collect combo then emit once)
+        capture_tokens = set()
+        capture_timer = {'t': None}
+
+        def finalize_capture():
+            capture_timer['t'] = None
+            if not self._capture_callback:
+                return
+            code = '+'.join(sorted(capture_tokens)) or ''
+            if not code:
+                return
+            human = 'MIDI ' + ('Combo ' if len(capture_tokens) > 1 else '') + '+'.join(sorted(capture_tokens))
+            sig = EventSignature(type='midi', code=code, human=human)
+            try:
+                print(f"[capture] midi: {code}", file=sys.stdout, flush=True)
+            except Exception:
+                pass
+            capture_tokens.clear()
+            self._emit_capture(sig)
+            try:
+                for inp in inputs:
+                    inp.close()
+            except Exception:
+                pass
+
+        def schedule_finalize_capture():
+            if capture_timer['t']:
+                try:
+                    capture_timer['t'].cancel()
+                except Exception:
+                    pass
+            t = threading.Timer(0.7, finalize_capture)
+            t.daemon = True
+            t.start()
+            capture_timer['t'] = t
+
         while not self._stop_event.is_set():
             cleanup()
             for inp in inputs:
@@ -478,19 +514,32 @@ class DeviceListener:
                             if msg.type == 'note_on' and msg.velocity > 0:
                                 token = f"note{msg.note}v{msg.velocity}" if opt_velocity else f"note{msg.note}"
                                 pressed.add(token)
+                                if self._capture_callback:
+                                    capture_tokens.add(token)
+                                    schedule_finalize_capture()
                             else:
                                 token = f"note{msg.note}v{msg.velocity}" if opt_velocity else f"note{msg.note}"
                                 if token in pressed:
                                     pressed.remove(token)
+                                if self._capture_callback and token in capture_tokens:
+                                    capture_tokens.remove(token)
                                 to_remove = [c for c in list(fired) if token in c.split('+')]
                                 for c in to_remove:
                                     fired.remove(c)
-                                continue
+                                if not self._capture_callback:
+                                    continue
+                                else:
+                                    schedule_finalize_capture()
+                                    continue
                         elif msg.type in ('control_change',) and opt_filter_cc:
                             token = f"cc{msg.control}:{msg.value}"
                             if opt_ignore_same_cc:
                                 existing = [p for p in pressed if p.startswith(f"cc{msg.control}:")]
                                 if existing and any(p == token for p in existing):
+                                    # already same value
+                                    if self._capture_callback:
+                                        capture_tokens.add(token)
+                                        schedule_finalize_capture()
                                     continue
                                 for p in existing:
                                     if p != token:
@@ -499,18 +548,35 @@ class DeviceListener:
                                         except KeyError:
                                             pass
                             pressed.add(token)
+                            if self._capture_callback:
+                                capture_tokens.add(token)
+                                schedule_finalize_capture()
                         elif msg.type in ('program_change',):
                             token = f"pc{msg.program}"
                             pressed.add(token)
+                            if self._capture_callback:
+                                capture_tokens.add(token)
+                                schedule_finalize_capture()
                         elif msg.type in ('pitchwheel',):
                             token = f"pw{msg.pitch}"
                             pressed.add(token)
+                            if self._capture_callback:
+                                capture_tokens.add(token)
+                                schedule_finalize_capture()
                         else:
                             continue
-                        fire()
+                        if not self._capture_callback:
+                            fire()
                 except Exception:
                     continue
             self._stop_event.wait(0.02)
+
+        # If capture was armed but nothing arrived, just exit
+        if self._capture_callback:
+            try:
+                finalize_capture()
+            except Exception:
+                pass
 
         for inp in inputs:
             try:
@@ -530,6 +596,13 @@ class MultiDeviceListener:
         # Always include global keyboard and mouse
         self._listeners.append(DeviceListener('keyboard', {}))
         self._listeners.append(DeviceListener('mouse', {}))
+        # Add all MIDI inputs if available
+        try:
+            from .midi_devices import list_midi_inputs
+            for md in list_midi_inputs():
+                self._listeners.append(DeviceListener('midi', {'name': md.name}))
+        except Exception:
+            pass
 
         # Include all HID devices available at construction time
         try:
