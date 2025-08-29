@@ -4,12 +4,13 @@ from typing import Literal, Optional, Dict, Any
 
 @dataclass
 class EventSignature:
-    type: Literal['hid', 'keyboard', 'mouse', 'multi']
+    type: Literal['hid', 'keyboard', 'mouse', 'multi', 'midi']
     # For HID: vendor_id, product_id, and raw pattern (hex string)
+    # For MIDI: code = '<msg_type>:<channel>:<note/control>', e.g. 'note_on:1:60'
     vendor_id: Optional[int] = None
     product_id: Optional[int] = None
-    code: str = ''  # normalized string payload
-    human: str = ''  # human-readable label
+    code: str = ''  # normalized string payload (for MIDI: msg_type:channel:note/control)
+    human: str = ''  # human-readable label (for MIDI: e.g. 'MIDI Note On C4 (ch 1)')
 
     def to_dict(self) -> Dict[str, Any]:
         return {

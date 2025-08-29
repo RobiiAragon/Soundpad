@@ -11,11 +11,18 @@ try:
 except Exception:  # pragma: no cover
     _central_logger = None
 
+
 try:
     from pynput import keyboard, mouse  # type: ignore
 except Exception:  # pragma: no cover
     keyboard = None  # type: ignore
     mouse = None  # type: ignore
+
+# MIDI support
+try:
+    import mido
+except Exception:
+    mido = None
 
 try:
     import pywinusb.hid as hid  # type: ignore
@@ -30,10 +37,10 @@ class DeviceListener:
         self.dtype = dtype
         self.dinfo = dinfo
         self.is_running = False
-        self._bindings: Dict[str, Callback] = {}
+        self._bindings = {}
         self._capture_callback = None
         self._capture_keep_open = False
-        self._thread: Optional[threading.Thread] = None
+        self._thread = None
         self._stop_event = threading.Event()
         # Resources
         self._hid_device = None
@@ -45,6 +52,9 @@ class DeviceListener:
         # Capture state
         self._capture_keys = set()
         self._capture_timer = None
+        # MIDI state
+        self._midi_inport = None
+        self._midi_last_msg = None
         # Parent multi listener (set when part of MultiDeviceListener)
         self._parent_multidevice = None  # type: ignore
 
@@ -75,6 +85,12 @@ class DeviceListener:
             except Exception:
                 pass
             self._hid_device = None
+        if self._midi_inport:
+            try:
+                self._midi_inport.close()
+            except Exception:
+                pass
+            self._midi_inport = None
         if self._capture_timer:
             try:
                 self._capture_timer.cancel()
@@ -105,9 +121,54 @@ class DeviceListener:
                 self._run_mouse()
             elif self.dtype == 'hid':
                 self._run_hid()
+            elif self.dtype == 'midi':
+                self._run_midi()
         except Exception as e:  # pragma: no cover
             if _central_logger and _central_logger.has_listeners():
                 _central_logger.log(f"[listener] error {self.dtype}: {e}")
+
+    # ---- midi ----
+    def _run_midi(self):
+        if not mido:
+            return
+        name = self.dinfo.get('name')
+        try:
+            self._midi_inport = mido.open_input(name)
+        except Exception:
+            return
+        while not self._stop_event.is_set():
+            for msg in self._midi_inport.iter_pending():
+                if msg.type in ('note_on', 'note_off', 'control_change'):
+                    code = f"{msg.type}:{msg.channel}:{getattr(msg, 'note', getattr(msg, 'control', ''))}"
+                    human = self._midi_human(msg)
+                    sig = EventSignature(type='midi', code=code, human=human)
+                    self._midi_last_msg = msg
+                    if self._capture_callback:
+                        self._emit_capture(sig)
+                        if not self._capture_keep_open:
+                            return
+                    cb = self._bindings.get(self._sig_key(sig))
+                    if cb:
+                        cb()
+                    parent = getattr(self, '_parent_multidevice', None)
+                    if parent:
+                        try:
+                            parent._on_raw_event(sig)  # type: ignore
+                        except Exception:
+                            pass
+            self._stop_event.wait(0.05)
+
+    def _midi_human(self, msg):
+        if msg.type == 'note_on' or msg.type == 'note_off':
+            note = getattr(msg, 'note', None)
+            channel = getattr(msg, 'channel', None)
+            return f"MIDI {msg.type.replace('_', ' ').title()} Nota {note} (ch {channel+1})"
+        elif msg.type == 'control_change':
+            ctrl = getattr(msg, 'control', None)
+            val = getattr(msg, 'value', None)
+            channel = getattr(msg, 'channel', None)
+            return f"MIDI CC {ctrl}={val} (ch {channel+1})"
+        return f"MIDI {msg.type}"
 
     # ---- keyboard ----
     def _run_keyboard(self):  # noqa: C901
