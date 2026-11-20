@@ -20,7 +20,8 @@ class MappingItem:
     def from_dict(d: Dict[str, Any]) -> 'MappingItem':
         sigdata = d.get('signature')
         sig = EventSignature.from_dict(sigdata) if sigdata else None
-        return MappingItem(id=d.get('id', 0), signature=sig, audio=d.get('audio',''))
+        raw_id = d.get('id')
+        return MappingItem(id=raw_id if isinstance(raw_id, int) else 0, signature=sig, audio=d.get('audio') or '')
 
 class MappingManager:
     def __init__(self):
@@ -30,10 +31,22 @@ class MappingManager:
     def load(self, lst: List[Dict[str, Any]]):
         self._items.clear()
         self._next_id = 1
+        items = []
         for raw in lst:
-            item = MappingItem.from_dict(raw)
+            try:
+                items.append(MappingItem.from_dict(raw))
+            except (KeyError, TypeError, AttributeError):
+                continue  # skip malformed entries instead of refusing to start
+        # Older configs saved mappings without an id (every row became id 0), which made
+        # "remove" delete all of them at once. Give missing/duplicate ids a fresh one.
+        self._next_id = max([i.id for i in items if i.id > 0], default=0) + 1
+        seen = set()
+        for item in items:
+            if item.id <= 0 or item.id in seen:
+                item.id = self._next_id
+                self._next_id += 1
+            seen.add(item.id)
             self._items.append(item)
-            self._next_id = max(self._next_id, item.id + 1)
 
     def serialize(self) -> List[Dict[str, Any]]:
         return [i.to_dict() for i in self._items]

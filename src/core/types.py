@@ -23,6 +23,8 @@ class EventSignature:
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> 'EventSignature':
+        if d.get('type') not in ('hid', 'keyboard', 'mouse', 'multi', 'midi'):
+            raise KeyError(f"unknown signature type: {d.get('type')!r}")
         return EventSignature(
             type=d['type'],
             vendor_id=d.get('vendor_id'),

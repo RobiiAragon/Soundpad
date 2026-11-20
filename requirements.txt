@@ -1,5 +1,4 @@
 PyQt6>=6.6
 pynput>=1.7.7
-pywinusb>=0.4.2
+pywinusb>=0.4.2; sys_platform == "win32"
 pygame>=2.5.2
-pydub

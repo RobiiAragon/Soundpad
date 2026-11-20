@@ -51,27 +51,19 @@ import argparse
 
 
 def main():
-    # Hook global para registrar crashes en crash.log
+    # Global crash hook: write unhandled errors to crash.log next to config.json
+    # (the frozen .exe has no console, and its folder may not be writable).
     import traceback
+    from src.core.config_store import config_dir
+
     def _excepthook(t, v, tb):
         try:
-            with open('crash.log', 'a', encoding='utf-8') as f:
+            os.makedirs(config_dir(), exist_ok=True)
+            with open(os.path.join(config_dir(), 'crash.log'), 'a', encoding='utf-8') as f:
                 f.write('\n=== Unhandled Exception ===\n')
                 traceback.print_exception(t, v, tb, file=f)
         except Exception:
             pass
-        traceback.print_exception(t, v, tb)
-    sys.excepthook = _excepthook
-    # Global crash hook para registrar errores en entorno PyInstaller sin consola
-    import traceback
-    def _excepthook(t, v, tb):
-        try:
-            with open('crash.log', 'a', encoding='utf-8') as f:
-                f.write('\n=== Unhandled Exception ===\n')
-                traceback.print_exception(t, v, tb, file=f)
-        except Exception:
-            pass
-        # También imprimir a stdout (si existe consola)
         traceback.print_exception(t, v, tb)
     sys.excepthook = _excepthook
     parser = argparse.ArgumentParser()

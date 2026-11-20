@@ -13,6 +13,7 @@ class AudioPlayer:
         except Exception:
             pass
         self.max_channels = max_channels
+        self.volume = 1.0
         self.cache: Dict[str, pygame.mixer.Sound] = {}
 
     def preload(self, paths: List[str]):
@@ -27,6 +28,7 @@ class AudioPlayer:
             if p and p not in self.cache:
                 try:
                     self.cache[p] = pygame.mixer.Sound(p)
+                    self.cache[p].set_volume(self.volume)
                 except Exception:
                     # ignore bad files
                     pass
@@ -38,6 +40,7 @@ class AudioPlayer:
         if not snd:
             try:
                 snd = pygame.mixer.Sound(path)
+                snd.set_volume(self.volume)
                 self.cache[path] = snd
             except Exception:
                 return
@@ -54,6 +57,15 @@ class AudioPlayer:
             self.max_channels = n
         except Exception:
             pass
+
+    def set_volume(self, volume: float):
+        """Master volume 0.0-1.0 applied to every loaded sound."""
+        self.volume = max(0.0, min(1.0, float(volume)))
+        for snd in self.cache.values():
+            try:
+                snd.set_volume(self.volume)
+            except Exception:
+                pass
 
     def stop_all(self):
         try:

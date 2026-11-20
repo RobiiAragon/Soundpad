@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton, QFileDialog,
     QLineEdit, QMessageBox, QSystemTrayIcon, QHBoxLayout, QCheckBox,
     QTabWidget, QTextEdit, QTableWidget, QTableWidgetItem, QAbstractItemView,
-    QHeaderView, QStyle, QToolButton, QMenu
+    QHeaderView, QStyle, QToolButton, QMenu, QSlider
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QCursor, QBrush, QColor  # Añadimos QBrush/QColor para resaltar duplicados
@@ -93,6 +93,24 @@ class MainWindow(QWidget):
         self.toggle_listen_btn = QPushButton("Iniciar escucha")
         layout.addWidget(self.apply_btn)
         layout.addWidget(self.toggle_listen_btn)
+
+        playback_row = QHBoxLayout()
+        self.stop_sounds_btn = QPushButton("Detener sonidos")
+        self.stop_sounds_btn.setToolTip("Corta todos los audios que estén sonando")
+        playback_row.addWidget(self.stop_sounds_btn)
+        playback_row.addSpacing(12)
+        playback_row.addWidget(QLabel("Volumen"))
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setAccessibleName("Volumen")
+        self.volume_lbl = QLabel("100%")
+        self.volume_lbl.setMinimumWidth(36)
+        playback_row.addWidget(self.volume_slider, 1)
+        playback_row.addWidget(self.volume_lbl)
+        layout.addLayout(playback_row)
+        self.stop_sounds_btn.clicked.connect(self._stop_sounds)
+        self.volume_slider.valueChanged.connect(self._on_volume_changed)
+        self.volume_slider.sliderReleased.connect(self._save_volume)
 
         self.device_selector.currentIndexChanged.connect(self._on_device_changed)
         self.apply_btn.clicked.connect(self._apply_changes)
@@ -193,6 +211,7 @@ QTabBar::tab:selected { background: #3a3d41; }
         self.tray.request_show.connect(self._on_tray_show)
         self.tray.request_start_listen.connect(self._start_listening)
         self.tray.request_stop_listen.connect(self._stop_listening)
+        self.tray.request_stop_sounds.connect(self._stop_sounds)
         self.tray.request_quit.connect(self._on_tray_quit)
         self.tray.show()
 
@@ -394,18 +413,13 @@ QTabBar::tab:selected { background: #3a3d41; }
         self._capture_listener = tmp_listener
         self._set_status(f"Capturando fila {row_idx+1}... presiona combinación")
         def on_captured(sig: EventSignature):
+            # Runs on the listener thread (pynput/HID). Qt widgets may only be touched from
+            # the GUI thread, so hand the result over through a queued signal.
             try:
                 tmp_listener.stop()
             except Exception:
                 pass
-            item.signature = sig
-            self._refresh_row(row_idx, item)
-            self._update_duplicate_highlight()
-            self._capture_listener = None
-            self._set_status(f"Captura fila {row_idx+1}: {sig.human}")
-            self._resume_listening_if_needed()
-            if has_listeners():
-                log(f"Captura completada fila={row_idx+1} sig={sig.type}:{sig.code}")
+            self.capture_ready.emit(row_idx, sig)
         tmp_listener.capture_next(on_captured)
         try:
             tmp_listener.start()
@@ -427,8 +441,21 @@ QTabBar::tab:selected { background: #3a3d41; }
         QTimer.singleShot(8000, on_timeout)
 
     def _on_capture_ready(self, row_idx: int, sig: EventSignature):
-        # Legacy (no-op with new table approach)
-        pass
+        # GUI thread. Ignore late results after the capture timed out.
+        if self._capture_listener is None:
+            return
+        self._capture_listener = None
+        item = self.mapping_manager.get_by_row(row_idx)
+        if not item:
+            self._resume_listening_if_needed()
+            return
+        item.signature = sig
+        self._refresh_row(row_idx, item)
+        self._update_duplicate_highlight()
+        self._set_status(f"Captura fila {row_idx+1}: {sig.human}")
+        self._resume_listening_if_needed()
+        if has_listeners():
+            log(f"Captura completada fila={row_idx+1} sig={sig.type}:{sig.code}")
 
     def _apply_changes(self):
         # stop existing listener
@@ -436,11 +463,9 @@ QTabBar::tab:selected { background: #3a3d41; }
             self.listener.stop()
             self.listener = None
 
-        # build mapping (signature + audio only)
-        mapping = []
-        for m in self.mapping_manager.items():
-            if m.signature and m.audio:
-                mapping.append({'signature': m.signature.to_dict(), 'audio': m.audio})
+        # Only complete rows are bound; every row (with its id) is saved so unfinished
+        # rows survive a restart and ids stay unique.
+        mapping = [m.to_dict() for m in self.mapping_manager.items() if m.signature and m.audio]
         self.audio.preload([m['audio'] for m in mapping])
 
         dtype, dinfo = self.device_map[self.device_selector.currentIndex()]
@@ -455,8 +480,9 @@ QTabBar::tab:selected { background: #3a3d41; }
 
         # save config
         self.config.data['selected_device'] = {'type': dtype, **dinfo}
-        self.config.data['mappings'] = mapping
-        self.config.save()
+        self.config.data['mappings'] = self.mapping_manager.serialize()
+        if not self.config.save():
+            self._set_status(f"No se pudo guardar {self.config.path}")
 
         # Auto-start listening after applying
         self._start_listening()
@@ -509,6 +535,12 @@ QTabBar::tab:selected { background: #3a3d41; }
         data = self.config.data
         rows = data.get('mappings', [])
         self.mapping_manager.load(rows)
+        try:
+            vol = float(data.get('volume', 1.0))
+        except (TypeError, ValueError):
+            vol = 1.0
+        self.volume_slider.setValue(round(max(0.0, min(1.0, vol)) * 100))
+        self._on_volume_changed(self.volume_slider.value())
         self.table.setRowCount(0)
         for item in self.mapping_manager.items():
             r = self.table.rowCount()
@@ -518,6 +550,18 @@ QTabBar::tab:selected { background: #3a3d41; }
     # MIDI opciones eliminadas
 
     # _current_midi_options removido
+
+    def _stop_sounds(self):
+        self.audio.stop_all()
+        self._set_status("Sonidos detenidos")
+
+    def _on_volume_changed(self, value: int):
+        self.audio.set_volume(value / 100)
+        self.volume_lbl.setText(f"{value}%")
+
+    def _save_volume(self):
+        self.config.data['volume'] = self.volume_slider.value() / 100
+        self.config.save()
 
     def _set_status(self, msg: str):
         if has_listeners():

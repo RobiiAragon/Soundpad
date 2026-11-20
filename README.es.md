@@ -4,7 +4,7 @@
 
 **Asigna botones de cualquier dispositivo USB — teclado, mouse o control HID — para reproducir sonidos en Windows.**
 
-![Python 3.10+](https://img.shields.io/badge/Python%203.10+-3776AB?style=flat-square&logo=python&logoColor=white) ![PyQt6](https://img.shields.io/badge/PyQt6-41CD52?style=flat-square&logo=qt&logoColor=white) ![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white) ![License MIT](https://img.shields.io/badge/License%20MIT-2ea44f?style=flat-square)
+[![CI](https://github.com/RobiiAragon/Soundpad/actions/workflows/ci.yml/badge.svg)](https://github.com/RobiiAragon/Soundpad/actions/workflows/ci.yml) ![Python 3.10+](https://img.shields.io/badge/Python%203.10+-3776AB?style=flat-square&logo=python&logoColor=white) ![PyQt6](https://img.shields.io/badge/PyQt6-41CD52?style=flat-square&logo=qt&logoColor=white) ![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white) ![License MIT](https://img.shields.io/badge/License%20MIT-2ea44f?style=flat-square)
 
 [English](README.md) · **Español**
 
@@ -17,9 +17,10 @@ Una botonera de sonidos que vive en la bandeja del sistema. Eliges un dispositiv
 ## Funciones
 
 - 🎛️ Elige un dispositivo HID específico o usa los hooks globales de teclado y mouse.
-- 🔊 Hasta 10 botones con archivos de audio (WAV, MP3, OGG…).
+- 🔊 Todos los botones que quieras, cada uno con un archivo de audio (WAV, MP3, OGG…). También combinaciones de teclas y combos entre dispositivos (por ejemplo tecla + botón del mouse).
+- 🎚️ Volumen general y botón **Detener sonidos** (también en el menú de la bandeja).
 - 🧷 Corre en segundo plano con ícono en la bandeja.
-- 💾 Guarda tus asignaciones en `%APPDATA%`.
+- 💾 Guarda tus asignaciones en `%APPDATA%\USB-Sound-Mapper\config.json` (los errores se registran en `crash.log` en la misma carpeta).
 
 ## Cómo usarlo
 
@@ -38,6 +39,22 @@ python -m src.app
 
 - Algunos dispositivos HID piden permisos de administrador para leer sus reportes. Si uno no abre, usa **Global Keyboard** o **Global Mouse**.
 - El audio usa `pygame.mixer`. Quité el soporte MIDI para simplificar.
+
+## Generar el .exe
+
+```powershell
+python -m pip install -r requirements.txt pyinstaller
+pyinstaller --noconfirm --onefile --windowed --name Soundpad --paths . --collect-submodules src src/app.py
+```
+
+El CI genera el mismo `.exe` en cada push (se descarga desde los artifacts de la ejecución) y lo adjunta al release cuando se sube un tag `v*`.
+
+## Pruebas
+
+```powershell
+python -m pip install pytest
+python -m pytest -q
+```
 
 ## Estructura
 
