@@ -1,26 +1,34 @@
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"label": "Run USB Sound Mapper",
-			"type": "shell",
-			"command": "python",
-			"args": [
-				"-m",
-				"src.app"
-			],
-			"group": "build",
-			"problemMatcher": []
-		},
-		{
-			"label": "Build Soundpad",
-			"type": "shell",
-			"command": "python",
-			"args": [
-				"-m",
-				"src.app"
-			],
-			"group": "build"
-		}
-	]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run USB Sound Mapper",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "-m",
+        "src.app"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Soundpad",
+      "type": "shell",
+      "command": "pyinstaller",
+      "args": [
+        "--noconfirm",
+        "--onefile",
+        "--windowed",
+        "--name",
+        "Soundpad",
+        "--paths",
+        ".",
+        "--collect-submodules",
+        "src",
+        "src/app.py"
+      ],
+      "group": "build"
+    }
+  ]
 }

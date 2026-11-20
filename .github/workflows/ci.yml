@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q
+
+  build:
+    # Portable Windows .exe, the same kind of file published in Releases.
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt pyinstaller
+      - name: Build
+        run: pyinstaller --noconfirm --onefile --windowed --name Soundpad --paths . --collect-submodules src src/app.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Soundpad-windows
+          path: dist/Soundpad.exe
+      - name: Attach to the GitHub release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" dist/Soundpad.exe --clobber || gh release create "${{ github.ref_name }}" dist/Soundpad.exe --generate-notes

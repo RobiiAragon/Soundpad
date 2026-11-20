@@ -8,6 +8,7 @@ class TrayController(QObject):
     request_quit = pyqtSignal()
     request_start_listen = pyqtSignal()
     request_stop_listen = pyqtSignal()
+    request_stop_sounds = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -26,16 +27,20 @@ class TrayController(QObject):
 
         self.tray = QSystemTrayIcon(QIcon(pix))
         self.tray.setToolTip("USB Sound Mapper")
-        menu = QMenu()
+        # Keep a reference: QSystemTrayIcon does not take ownership of the menu, so a
+        # local QMenu can be garbage-collected and the right-click menu stops working.
+        self.menu = menu = QMenu()
 
         self.show_action = QAction("Mostrar ventana")
         self.start_action = QAction("Iniciar escucha")
         self.stop_action = QAction("Detener escucha")
+        self.stop_sounds_action = QAction("Detener sonidos")
         self.quit_action = QAction("Salir")
 
         menu.addAction(self.show_action)
         menu.addAction(self.start_action)
         menu.addAction(self.stop_action)
+        menu.addAction(self.stop_sounds_action)
         menu.addSeparator()
         menu.addAction(self.quit_action)
 
@@ -44,6 +49,7 @@ class TrayController(QObject):
         self.show_action.triggered.connect(self.request_show)
         self.start_action.triggered.connect(self.request_start_listen)
         self.stop_action.triggered.connect(self.request_stop_listen)
+        self.stop_sounds_action.triggered.connect(self.request_stop_sounds)
         self.quit_action.triggered.connect(self.request_quit)
 
     def show(self):
